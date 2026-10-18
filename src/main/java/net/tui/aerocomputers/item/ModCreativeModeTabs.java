@@ -22,6 +22,7 @@ public class ModCreativeModeTabs {
                         output.accept(ModBlocks.BOARDCOMPUTER);
                         output.accept(ModItems.HUD_HELMET);
                         output.accept(ModBlocks.HUDDISPLAY);
+                        output.accept(ModBlocks.WEAPONLINKER);
 
                     }).build());
 

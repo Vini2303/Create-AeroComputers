@@ -32,6 +32,7 @@ import net.tui.aerocomputers.renderer.HudDisplayRenderer;
 import net.tui.aerocomputers.screen.ModMenuTypes;
 import net.tui.aerocomputers.screen.custom.BoardComputerScreen;
 import net.tui.aerocomputers.screen.custom.HudDisplayScreen;
+import net.tui.aerocomputers.screen.custom.WeaponLinkerScreen;
 
 // This class will not load on dedicated servers. Accessing client side code from here is safe.
 @Mod(value = AeroComputers.MOD_ID, dist = Dist.CLIENT)
@@ -57,6 +58,7 @@ public class AeroComputersClient {
     public static void registerScreens(RegisterMenuScreensEvent event) {
         event.register(ModMenuTypes.BOARDCOMPUTER_MENU.get(), BoardComputerScreen::new);
         event.register(ModMenuTypes.HUDDISPLAY_MENU.get(), HudDisplayScreen::new);
+        event.register(ModMenuTypes.WEAPONLINKER_MENU.get(), WeaponLinkerScreen::new);
     }
 
     @SubscribeEvent

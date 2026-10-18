@@ -21,6 +21,10 @@ public class ModBlockEntitys {
             BLOCK_ENTITYS.register("hud_display_be", () -> BlockEntityType.Builder.of(
                     HudDisplayBlockEntity::new, ModBlocks.HUDDISPLAY.get()).build(null));
 
+    public static final Supplier<BlockEntityType<WeaponLinkerBlockEntity>> WEAPONLINKER_BE =
+            BLOCK_ENTITYS.register("weapon_linker_be", () -> BlockEntityType.Builder.of(
+                    WeaponLinkerBlockEntity::new, ModBlocks.WEAPONLINKER.get()).build(null));
+
 
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITYS.register(eventBus);

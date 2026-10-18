@@ -1,5 +1,6 @@
 package net.tui.aerocomputers.network;
 
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.tui.aerocomputers.AeroComputers;
@@ -49,6 +50,12 @@ public class ModNetworking {
                 HudDisplayEntryPayload.TYPE,
                 HudDisplayEntryPayload.STREAM_CODEC,
                 HudDisplayEntryPayload::handle
+        );
+
+        registrar.playToServer(
+                WeaponLinkerEntryPayload.TYPE,
+                WeaponLinkerEntryPayload.STREAM_CODEC,
+                WeaponLinkerEntryPayload::handle
         );
 
     }

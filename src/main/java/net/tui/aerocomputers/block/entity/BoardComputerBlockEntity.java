@@ -539,7 +539,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
     private void registerNativeClasses() {
 
-        nativeClasses.put("Label", args -> {
+        nativeClasses.put("hud.Label", args -> {
             DrawObject obj = new DrawObject();
             obj.id = "d" + (drawObjectIdCounter++);
             obj.type = "label";
@@ -553,7 +553,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             return wrapDrawObject(obj);
         });
 
-        nativeClasses.put("Line", args -> {
+        nativeClasses.put("hud.Line", args -> {
             DrawObject obj = new DrawObject();
             obj.id = "d" + (drawObjectIdCounter++);
             obj.type = "line";
@@ -569,7 +569,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             return wrapDrawObject(obj);
         });
 
-        nativeClasses.put("Poly", args -> {
+        nativeClasses.put("hud.Poly", args -> {
             DrawObject obj = new DrawObject();
             obj.id = "d" + (drawObjectIdCounter++);
             obj.type = "poly";
@@ -582,7 +582,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             return wrapDrawObject(obj);
         });
 
-        nativeClasses.put("Rect", args -> {
+        nativeClasses.put("hud.Rect", args -> {
             DrawObject obj = new DrawObject();
             obj.id = "d" + (drawObjectIdCounter++);
             obj.type = "rect";

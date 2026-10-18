@@ -11,6 +11,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.block.custom.BoardComputerBlock;
 import net.tui.aerocomputers.block.custom.HudDisplayBlock;
+import net.tui.aerocomputers.block.custom.WeaponLinkerBlock;
 import net.tui.aerocomputers.item.ModItems;
 
 import java.util.function.Supplier;
@@ -19,13 +20,16 @@ public class ModBlocks {
     public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(AeroComputers.MOD_ID);
 
     public static final DeferredBlock<Block> BOARDCOMPUTER = registerBlock("board_computer",
-            () -> new BoardComputerBlock(BlockBehaviour.Properties.of().strength(2).requiresCorrectToolForDrops().sound(SoundType.METAL).noOcclusion()));
+            () -> new BoardComputerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL).noOcclusion()));
 
     public static final DeferredBlock<Block> HUDDISPLAY = registerBlock("hud_display",
             () -> new HudDisplayBlock(BlockBehaviour.Properties.of().strength(0.2f).sound(SoundType.GLASS).noOcclusion()
                     .isViewBlocking((state, level, pos) -> false)
                     .isSuffocating((state, level, pos) -> false)
                     .lightLevel(state -> 0)));
+
+    public static final DeferredBlock<Block> WEAPONLINKER = registerBlock("weapon_linker",
+            () -> new WeaponLinkerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL).noOcclusion()));
 
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {

@@ -44,7 +44,7 @@ public class HudDisplayBlock extends HorizontalDirectionalBlock implements Entit
     @Override
     protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
         VoxelShape var10000;
-        switch ((Direction)state.getValue(FACING)) {
+        switch (state.getValue(FACING)) {
             case EAST, WEST -> var10000 = SHAPE1;
             default -> var10000 = SHAPE2;
         }

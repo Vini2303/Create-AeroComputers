@@ -3,6 +3,7 @@
 
   "block.createaerocomputers.board_computer": "Board Computer",
   "block.createaerocomputers.hud_display": "HUD Display",
+  "block.createaerocomputers.weapon_linker": "Weapon Linker",
 
   "creativetab.createaerocomputers.aerocomputers_tab": "AeroComputers",
 
@@ -15,6 +16,7 @@
 
   "tooltip.createaerocomputers.board_computer_shift": "This Computer can be programmt with a language similar to Python, you can read Contraption telemetry data, you can create custom Heads up displays(HUD), you can connect to redstone links to control your aircraft, or if you want more destruction you can link the Create Arms mod for weapon support. If you need help with programming just click the Question Mark Button or Control-Click a word. You will also get feedback if your Syntax is wrong",
 
+  "tooltip.createaerocomputers.weapon_linker_shift": "can be placed on an MDF or ... or an Big Cannon Mound, can be linked to a board computer, to get access to the Weapons",
 
 
   "help.aero.basics": "Basics",

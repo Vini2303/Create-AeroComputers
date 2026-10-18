@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=east": {
+      "model": "createaerocomputers:block/weapon_linker"
+    },
+    "facing=west": {
+      "model": "createaerocomputers:block/weapon_linker",
+      "y": 180
+    },
+    "facing=south": {
+      "model": "createaerocomputers:block/weapon_linker",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "createaerocomputers:block/weapon_linker",
+      "y": 270
+    }
+  }
+}
