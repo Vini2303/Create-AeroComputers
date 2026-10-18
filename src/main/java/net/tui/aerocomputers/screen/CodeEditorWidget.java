@@ -76,6 +76,30 @@ public class CodeEditorWidget extends AbstractWidget {
     private enum AutocompleteMode { NORMAL, METHOD, PARAM }
     private AutocompleteMode autocompleteMode = AutocompleteMode.NORMAL;
 
+    private static final int COLOR_MODULE = 0xFF4EC9B0;
+
+    private static int neighbourIndex(List<Token> toks, int i, int dir) {
+        for (int j = i + dir; j >= 0 && j < toks.size(); j += dir)
+            if (toks.get(j).type() != TokenType.WHITESPACE) return j;
+        return -1;
+    }
+
+    /** "math.sqrt" with i on "sqrt" -> "math", otherwise null */
+    private static String receiverBefore(List<Token> toks, int i) {
+        int dot = neighbourIndex(toks, i, -1);
+        if (dot < 0 || !toks.get(dot).text().equals(".")) return null;
+        int recv = neighbourIndex(toks, dot, -1);
+        return (recv >= 0 && toks.get(recv).type() == TokenType.IDENT) ? toks.get(recv).text() : null;
+    }
+
+    /** Same for plain text: wordStart is the index right after the '.' */
+    private static String receiverAt(String line, int wordStart) {
+        int end = wordStart - 1;
+        int start = end;
+        while (start > 0 && (Character.isLetterOrDigit(line.charAt(start - 1)) || line.charAt(start - 1) == '_')) start--;
+        return start < end ? line.substring(start, end) : null;
+    }
+
     public static final Map<String, String> HELP_LOOKUP = Map.ofEntries(
             Map.entry("if", "help.aero.if.text"),
             Map.entry("while", "help.aero.while.text"),
@@ -350,6 +374,8 @@ public class CodeEditorWidget extends AbstractWidget {
                     color = COLOR_DECLARATION_KEYWORD;
                 } else if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(suggestion) || functions.contains(suggestion)) {
                     color = COLOR_FUNCTION;
+                } else if (LanguageSpec.MODULES.contains(suggestion)) {
+                    color = COLOR_MODULE;
                 } else if (LanguageSpec.NATIVE_CLASSES.containsKey(suggestion) || classes.contains(suggestion)) {
                     color = COLOR_CLASS;
                 } else if (variables.contains(suggestion)) {
@@ -1611,13 +1637,17 @@ public class CodeEditorWidget extends AbstractWidget {
             return COLOR_FUNCTION;
         }
 
-        if (LanguageSpec.NATIVE_CLASSES.containsKey(word) || info.classes().containsKey(word)) {
-            return COLOR_CLASS;
+        if (LanguageSpec.MODULES.contains(word) && next.equals(".")) return COLOR_MODULE;
+
+        String receiver = receiverBefore(toks, i);
+        if (receiver != null && LanguageSpec.MODULES.contains(receiver)) {
+            String q = receiver + "." + word;
+            if (LanguageSpec.NATIVE_CLASSES.containsKey(q)) return COLOR_CLASS;
+            if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(q)) return COLOR_FUNCTION;
         }
 
-        if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(word) || info.functions().containsKey(word)) {
-            return COLOR_FUNCTION;
-        }
+        if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(word) || info.functions().containsKey(word)) return COLOR_FUNCTION; // print + eigene
+        if (info.classes().containsKey(word)) return COLOR_CLASS;
 
         // anything followed by '(' is a call
         if (next.equals("(")) {
@@ -1773,10 +1803,10 @@ public class CodeEditorWidget extends AbstractWidget {
         String lowerPrefix = prefix.toLowerCase();
 
         if (!isDeclarationLine) {
-            addMatching(LanguageSpec.BUILTIN_FUNCTION_NAMES, lowerPrefix);
+            addMatching(LanguageSpec.GLOBAL_FUNCTION_NAMES, lowerPrefix);
             addMatching(functions, lowerPrefix);
             addMatching(classes, lowerPrefix);
-            addMatching(LanguageSpec.NATIVE_CLASS_NAMES, lowerPrefix);
+            addMatching(LanguageSpec.MODULE_NAMES, lowerPrefix);   // statt NATIVE_CLASS_NAMES
         }
         addMatching(variables, lowerPrefix);
         addMatching(LanguageSpec.KEYWORD_NAMES, lowerPrefix);
@@ -1831,10 +1861,12 @@ public class CodeEditorWidget extends AbstractWidget {
             if (!alreadyHasEquals) {
                 suffix = "=";
             }
+        } else if (autocompleteMode == AutocompleteMode.NORMAL && LanguageSpec.MODULES.contains(suggestion)) {
+            boolean alreadyHasDot = end < line.length() && line.charAt(end) == '.';
+            if (!alreadyHasDot) suffix = ".";
         } else if (autocompleteMode == AutocompleteMode.METHOD
                 || (autocompleteMode == AutocompleteMode.NORMAL
                 && (functions.contains(suggestion) || classes.contains(suggestion)
-                || LanguageSpec.NATIVE_CLASSES.containsKey(suggestion)
                 || LanguageSpec.BUILTIN_FUNCTIONS.containsKey(suggestion)))) {
 
             boolean alreadyHasParens = end < line.length() && line.charAt(end) == '(';
@@ -1869,6 +1901,7 @@ public class CodeEditorWidget extends AbstractWidget {
 
         ensureCursorVisible();
         maybeAutoOutdent();
+        if (suffix.equals(".")) updateAutocomplete();
     }
 
     /** True if the cursor is inside an (unterminated) string or inside a comment. Uses the shared lexer. */
@@ -1926,12 +1959,16 @@ public class CodeEditorWidget extends AbstractWidget {
 
 
         Set<String> seen = new LinkedHashSet<>();
-        for (List<String> methods : classMethods.values()) {
-            for (String m : methods) {
-                if (m.toLowerCase().startsWith(prefix) && seen.add(m)) {
-                    autocompleteSuggestions.add(m);
-                }
+        String receiver = receiverAt(line, wordStart);
+
+        if (receiver != null && LanguageSpec.MODULES.contains(receiver)) {
+            for (String m : LanguageSpec.moduleMembers(receiver)) {
+                if (m.toLowerCase().startsWith(prefix) && seen.add(m)) autocompleteSuggestions.add(m);
             }
+        } else {
+            for (List<String> methods : classMethods.values())
+                for (String m : methods)
+                    if (m.toLowerCase().startsWith(prefix) && seen.add(m)) autocompleteSuggestions.add(m);
         }
 
         if (autocompleteSuggestions.isEmpty()) {
@@ -1965,9 +2002,14 @@ public class CodeEditorWidget extends AbstractWidget {
                 depth++;
             } else if (t.text().equals("(")) {
                 if (depth == 0) {
-                    return (i > 0 && toks.get(i - 1).type() == TokenType.IDENT)
-                            ? toks.get(i - 1).text()
-                            : null;
+                    if (i > 0 && toks.get(i - 1).type() == TokenType.IDENT) {
+                        String name = toks.get(i - 1).text();
+                        String receiver = receiverBefore(toks, i - 1);
+                        return (receiver != null && LanguageSpec.MODULES.contains(receiver))
+                                ? receiver + "." + name
+                                : name;
+                    }
+                    return null;
                 }
                 depth--;
             }

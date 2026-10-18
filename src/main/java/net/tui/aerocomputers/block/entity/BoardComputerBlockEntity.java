@@ -389,7 +389,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     private final Map<String, java.util.function.Function<List<Object>, Object>> builtins = new HashMap<>();
 
     private void registerBuiltins() {
-        builtins.put("getPos", args -> {
+        builtins.put("aero.getPos", args -> {
             if (currentSubLevel == null) {
                 return List.of(
                         getBlockPos().getX() + 0.5,
@@ -412,7 +412,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                     round2(pos.z)
             );
         });
-        builtins.put("getVel", args -> {
+        builtins.put("aero.getVel", args -> {
             if (currentSubLevel == null)
                 return List.of(0.0,0.0,0.0);
 
@@ -443,7 +443,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                     round2(velocity.z)
             );
         });
-        builtins.put("getRot", args -> {
+        builtins.put("aero.getRot", args -> {
 
             if (currentSubLevel == null)
                 return List.of(0.0,0.0,0.0);
@@ -479,53 +479,53 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                     round2(Math.toDegrees(euler.z))
             );
         });
-        builtins.put("radar", args -> {
+        builtins.put("aero.radar", args -> {
             return getAllSubLevelPositions();
         });
-        builtins.put("round", args -> {
+        builtins.put("math.round", args -> {
             if (args.isEmpty()) return 0.0;
             return (double) Math.round(toNumber(args.get(0)));
         });
 
-        builtins.put("floor", args -> {
+        builtins.put("math.floor", args -> {
             if (args.isEmpty()) return 0.0;
             return Math.floor(toNumber(args.get(0)));
         });
 
-        builtins.put("ceil", args -> {
+        builtins.put("math.ceil", args -> {
             if (args.isEmpty()) return 0.0;
             return Math.ceil(toNumber(args.get(0)));
         });
-        builtins.put("abs", args -> args.isEmpty() ? 0.0 : Math.abs(toNumber(args.get(0))));
+        builtins.put("math.abs", args -> args.isEmpty() ? 0.0 : Math.abs(toNumber(args.get(0))));
 
-        builtins.put("min", args -> {
+        builtins.put("math.min", args -> {
             if (args.isEmpty()) return 0.0;
             double m = toNumber(args.get(0));
             for (Object a : args) m = Math.min(m, toNumber(a));
             return m;
         });
 
-        builtins.put("max", args -> {
+        builtins.put("math.max", args -> {
             if (args.isEmpty()) return 0.0;
             double m = toNumber(args.get(0));
             for (Object a : args) m = Math.max(m, toNumber(a));
             return m;
         });
 
-        builtins.put("sqrt", args -> args.isEmpty() ? 0.0 : Math.sqrt(toNumber(args.get(0))));
-        builtins.put("sin", args ->
+        builtins.put("math.sqrt", args -> args.isEmpty() ? 0.0 : Math.sqrt(toNumber(args.get(0))));
+        builtins.put("math.sin", args ->
                 Math.sin(Math.toRadians(toNumber(args.get(0))))
         );
 
-        builtins.put("cos", args ->
+        builtins.put("math.cos", args ->
                 Math.cos(Math.toRadians(toNumber(args.get(0))))
         );
 
-        builtins.put("asin", args ->
+        builtins.put("math.asin", args ->
                 Math.toDegrees(Math.asin(toNumber(args.get(0))))
         );
 
-        builtins.put("acos", args ->
+        builtins.put("math.acos", args ->
                 Math.toDegrees(Math.acos(toNumber(args.get(0))))
         );
     }
@@ -1456,18 +1456,22 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             return Double.parseDouble(tok);
         }
 
-        // identifier — variable reference or function call
-        if (peek().equals("(")) {
-            CallArgs callArgs = parseCallArgs();
+        // module access: math.sqrt(...), hud.Label(...)
+        if (LanguageSpec.MODULES.contains(tok) && peek().equals(".")) {
+            next();                                   // '.'
+            String member = next();
+            String qualified = tok + "." + member;
 
-            if (nativeClasses.containsKey(tok)) {
-                List<String> paramNames = LanguageSpec.NATIVE_CLASSES.getOrDefault(tok, List.of());
-                return nativeClasses.get(tok).create(resolveArgs(paramNames, callArgs));
+            if (peek().equals("(")) {
+                CallArgs callArgs = parseCallArgs();
+
+                if (nativeClasses.containsKey(qualified)) {
+                    List<String> paramNames = LanguageSpec.NATIVE_CLASSES.getOrDefault(qualified, List.of());
+                    return nativeClasses.get(qualified).create(resolveArgs(paramNames, callArgs));
+                }
+                return callFunction(qualified, callArgs);
             }
-            if (classes.containsKey(tok)) {
-                return instantiate(tok, callArgs);
-            }
-            return callFunction(tok, callArgs);
+            return 0.0;
         }
 
         return getVar(tok);
