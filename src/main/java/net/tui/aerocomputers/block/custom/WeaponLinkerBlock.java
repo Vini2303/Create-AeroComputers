@@ -20,13 +20,17 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.tui.aerocomputers.AeroComputers;
+import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
 import net.tui.aerocomputers.block.entity.HudDisplayBlockEntity;
+import net.tui.aerocomputers.block.entity.ModBlockEntitys;
 import net.tui.aerocomputers.block.entity.WeaponLinkerBlockEntity;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,6 +61,21 @@ public class WeaponLinkerBlock extends HorizontalDirectionalBlock implements Ent
 
         return var10000;
     }
+
+    @Nullable
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
+        if (type != ModBlockEntitys.WEAPONLINKER_BE.get()) {
+            return null;
+        }
+        return (level2, pos, st, be) -> {
+            if (be instanceof WeaponLinkerBlockEntity bce) {
+                bce.tick();
+            }
+        };
+    }
+
+
 
 
     @Override

@@ -139,6 +139,7 @@ dependencies {
     implementation files("run/mods/create-aeronautics-bounded-1.21.1-1.3.0.jar")
     implementation files("run/mods/AeroEngine-1.2.4.jar")
     implementation files("run/mods/sable-neoforge-1.21.1-2.0.3.jar")
+    implementation files("run/mods/createbigcannons-5.11.7+mc.1.21.1.jar")
 
     implementation files("run/mods/createarms-1.0.0.jar")
     implementation files("run/mods/geckolib-neoforge-1.21.1-4.8.4.jar")

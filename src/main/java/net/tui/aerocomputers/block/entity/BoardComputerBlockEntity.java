@@ -1474,6 +1474,16 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             return 0.0;
         }
 
+        // user-defined function or class: hi("tom"), Foo(1, 2)
+        if (peek().equals("(")) {
+            CallArgs callArgs = parseCallArgs();
+
+            if (classes.containsKey(tok)) {
+                return instantiate(tok, callArgs);
+            }
+            return callFunction(tok, callArgs);
+        }
+
         return getVar(tok);
     }
 
