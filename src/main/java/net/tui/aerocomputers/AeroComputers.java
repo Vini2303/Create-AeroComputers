@@ -1,6 +1,8 @@
 package net.tui.aerocomputers;
 
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.tui.aerocomputers.block.ModBlocks;
+import net.tui.aerocomputers.block.entity.ComputerRegistry;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
 import net.tui.aerocomputers.item.ModCreativeModeTabs;
 import net.tui.aerocomputers.item.ModItems;
@@ -59,5 +61,10 @@ public class AeroComputers {
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
 
+    }
+
+    @SubscribeEvent
+    public void onServerStopped(ServerStoppedEvent event) {
+        ComputerRegistry.clear();
     }
 }

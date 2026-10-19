@@ -66,8 +66,10 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             return allPositions;
         }
 
+        Vector3d currentPos = currentSubLevel.logicalPose().position();
+
         for (SubLevel subLevel : container.getAllSubLevels()) {
-            if(subLevel != currentSubLevel) {
+            if (subLevel != currentSubLevel) {
                 Vector3d pos = subLevel.logicalPose().position();
 
                 allPositions.add(List.of(
@@ -77,6 +79,14 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                 ));
             }
         }
+
+        allPositions.sort(Comparator.comparingDouble(pos -> {
+            double dx = pos.get(0) - currentPos.x();
+            double dy = pos.get(1) - currentPos.y();
+            double dz = pos.get(2) - currentPos.z();
+
+            return dx * dx + dy * dy + dz * dz;
+        }));
 
         return allPositions;
     }
@@ -179,22 +189,29 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         return editorCompletionUpdateId;
     }
 
+    public record Command(String name, List<Double> args) {
+        public double arg(int i) { return i < args.size() ? args.get(i) : 0.0; }
+    }
+
+    private final Map<String, Command> commands = new LinkedHashMap<>();
+
+    public @Nullable Command getCommand(String name) {
+        return commands.get(name);
+    }
+
+    private void issueCommand(String name, double... values) {
+        List<Double> list = new ArrayList<>();
+        for (double v : values) list.add(v);
+        commands.put(name, new Command(name, List.copyOf(list)));
+    }
+
+
     public BoardComputerBlockEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntitys.BOARDCOMPUTER_BE.get(), pos, blockState);
         setLazyTickRate(10);
         scopeStack.push(variables);
         registerBuiltins();
         registerNativeClasses();
-    }
-
-    public void onProgramEdited(String text) {
-        this.program = text;
-        compileBlocks();
-
-        editorCompletionUpdateId++;
-
-        setChanged();
-        notifyUpdate();
     }
 
     @Override
@@ -528,6 +545,38 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         builtins.put("math.acos", args ->
                 Math.toDegrees(Math.acos(toNumber(args.get(0))))
         );
+        builtins.put("bigc.aimangel", args -> {
+            double pitch = args.size() > 0 ? toNumber(args.get(0)) : 0.0;
+            double yaw   = args.size() > 1 ? toNumber(args.get(1)) : 0.0;
+            issueCommand("bigc.aimangel", pitch, yaw);
+            return 0.0;
+        });
+        builtins.put("bigc.fire", args -> {
+            double fire = args.size() > 0 ? toNumber(args.get(0)) : 0.0;
+            issueCommand("bigc.fire", fire);
+            return 0.0;
+        });
+        builtins.put("bigc.aimpos", args -> {
+            List<Double> pos = args.size() > 0 ? toPosList(args.get(0)) : List.of(0.0,0.0,0.0);
+            issueCommand("bigc.aimpos", pos.get(0), pos.get(1), pos.get(2));
+            return 0.0;
+        });
+        builtins.put("slrw.firechin", args -> {
+            double fire = args.size() > 0 ? toNumber(args.get(0)) : 0.0;
+            issueCommand("slrw.firechin", fire);
+            return 0.0;
+        });
+        builtins.put("slrw.aimchinangel", args -> {
+            double pitch = args.size() > 0 ? toNumber(args.get(0)) : 0.0;
+            double yaw = args.size() > 1 ? toNumber(args.get(1)) : 0.0;
+            issueCommand("slrw.aimchinangel", pitch, yaw);
+            return 0.0;
+        });
+        builtins.put("slrw.aimchinpos", args -> {
+            List<Double> pos = args.size() > 0 ? toPosList(args.get(0)) : List.of(0.0,0.0,0.0);
+            issueCommand("slrw.aimchinpos", pos.get(0), pos.get(1), pos.get(2));
+            return 0.0;
+        });
     }
 
 
@@ -605,81 +654,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     public void tick() {
         super.tick();
         printsThisTick = 0;
-
-        if (this.level != null && !this.level.isClientSide()) {
-
-            BlockEntity be = SableHelper.findBlockEntity(this.level, this.getBlockPos().below());
-
-            if (be instanceof MFDControllerBlockEntity mfdController) {
-                BlockPos cgPos = mfdController.getChinGunPos();
-
-                if (cgPos != null && !cgPos.equals(BlockPos.ZERO)) {
-                    if(!this.level.isClientSide) {
-                        BlockEntity cbe = level.getBlockEntity(cgPos);
-                        if(cbe instanceof ChinGunBlockEntity chinGun) {
-                            List<List<Double>> positions = getAllSubLevelPositions();
-
-                            Vector3d gunLocalPos = new Vector3d(
-                                    cgPos.getX() + 0.5,
-                                    cgPos.getY() + 0.5,
-                                    cgPos.getZ() + 0.5
-                            );
-
-                            Vector3d gunGlobalPos =
-                                    SableCompanion.INSTANCE.projectOutOfSubLevel(
-                                            this.level,
-                                            gunLocalPos,
-                                            new Vector3d()
-                                    );
-
-                            if (!positions.isEmpty()) {
-                                // 1. Get the target's global position.
-                                List<Double> target = getAllSubLevelPositions().get(0);
-
-                                Vector3d targetGlobal = new Vector3d(
-                                        target.get(0),
-                                        target.get(1),
-                                        target.get(2)
-                                );
-
-// 2. Get the sub-level containing the Chin Gun.
-                                SubLevelAccess gunSubLevel =
-                                        SableCompanion.INSTANCE.getContaining(chinGun);
-
-                                if (gunSubLevel != null) {
-                                    // 3. Convert the target from global to local coordinates.
-                                    // Use the inverse of the gun sub-level's logical pose.
-                                    gunSubLevel.logicalPose().transformPositionInverse(targetGlobal);
-
-                                    // 4. Calculate direction from the local gun position.
-                                    double dx = targetGlobal.x - (cgPos.getX() + 0.5);
-                                    double dy = targetGlobal.y - (cgPos.getY() + 0.5);
-                                    double dz = targetGlobal.z - (cgPos.getZ() + 0.5);
-
-                                    double horizontal = Math.sqrt(dx * dx + dz * dz);
-
-                                    float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-                                    float pitch = (float) -Math.toDegrees(
-                                            Math.atan2(dy, horizontal)
-                                    );
-
-                                    chinGun.setYaw(yaw);
-                                    chinGun.setPitch(pitch);
-                                    chinGun.setFiring(true);
-                                    chinGun.setChanged();
-
-                                    //AeroComputers.LOGGER.info(target + "  ---  " + gunGlobalPos + "  ---  " + yaw + "  ---  " + pitch);
-
-                                    level.sendBlockUpdated(cgPos, chinGun.getBlockState(), chinGun.getBlockState(), 3);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-
 
 
         if (!subLevelSeenThisCycle) {
@@ -1549,9 +1523,33 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     @Override
     public void onLoad() {
         super.onLoad();
-        if(this.level != null && !this.level.isClientSide()) {
+        if (this.level != null && !this.level.isClientSide()) {
+            ComputerRegistry.register(computerName, this);
             restart();
         }
+    }
+
+    @Override
+    public void remove() {
+        super.remove();
+        if (level != null && !level.isClientSide()) {
+            ComputerRegistry.unregister(computerName, this);
+        }
+    }
+
+    public void setComputerName(String name) {
+        if (Objects.equals(this.computerName, name))
+            return;
+
+        boolean server = level != null && !level.isClientSide();
+        if (server) ComputerRegistry.unregister(this.computerName, this);
+
+        this.computerName = name;
+
+        if (server) ComputerRegistry.register(name, this);
+
+        setChanged();
+        sync();
     }
 
     public void restart() {
@@ -1563,6 +1561,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         scopeStack.push(variables);
         callDepth = 0;
         drawObjects.clear();
+        commands.clear();
         drawObjectIdCounter = 0;
         setChanged();
         if (level != null && !level.isClientSide) {
@@ -1963,6 +1962,15 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         return result;
     }
 
+    private List<Double> toPosList(Object value) {
+        List<Double> result = new ArrayList<Double>();
+        if (value instanceof List<?> list) {
+            for (Object o : list) result.add((double) toNumber(o));
+        }
+        while (result.size() < 3) result.add(0.0);
+        return result;
+    }
+
     private List<Double> toDoubleList(Object value) {
         List<Double> result = new ArrayList<>();
         if (value instanceof List<?> list) {
@@ -2122,15 +2130,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
     public String getComputerName() {
         return computerName;
-    }
-
-    public void setComputerName(String name) {
-        if (Objects.equals(this.computerName, name))
-            return;
-
-        this.computerName = name;
-        setChanged();
-        sync();
     }
 
     private static class CallArgs {
