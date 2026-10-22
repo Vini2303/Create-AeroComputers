@@ -1,6 +1,6 @@
 package net.tui.aerocomputers.item.custom;
 
-import net.minecraft.client.Minecraft;
+import com.simibubi.create.foundation.utility.DistExecutor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -13,8 +13,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
+import net.neoforged.api.distmarker.Dist;
+import net.tui.aerocomputers.AeroComputersClient;
 import net.tui.aerocomputers.network.HudEntryPayload;
-import net.tui.aerocomputers.screen.custom.HudScreen;
 
 import java.util.List;
 
@@ -25,11 +26,15 @@ public class HUDHelmetItem extends ArmorItem {
     }
 
     @Override
-    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+    public InteractionResultHolder<ItemStack> use(
+            Level level,
+            Player player,
+            InteractionHand hand
+    ) {
         ItemStack stack = player.getItemInHand(hand);
 
-        if (player.isShiftKeyDown() && level.isClientSide) {
-            Minecraft.getInstance().setScreen(new net.tui.aerocomputers.screen.custom.HudScreen(hand));
+        if (level.isClientSide && player.isShiftKeyDown()) {
+            net.tui.aerocomputers.client.HUDHelmetClient.requestOpen(hand);
         }
 
         return InteractionResultHolder.success(stack);

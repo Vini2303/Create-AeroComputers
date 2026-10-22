@@ -6,7 +6,6 @@ import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.ShaftRenderer;
 import com.simibubi.create.content.kinetics.base.ShaftVisual;
 import com.simibubi.create.content.kinetics.simpleRelays.ShaftBlock;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -100,7 +99,7 @@ public class BoardComputerBlock extends DirectionalKineticBlock implements Entit
 
     @Override
     public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-        if(Screen.hasShiftDown()) {
+        if(true) {
             tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.board_computer_shift"));
         } else {
             tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.pressshift"));

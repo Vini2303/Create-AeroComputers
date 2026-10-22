@@ -58,7 +58,10 @@ public final class LanguageSpec {
                     "getPos", List.of(),
                     "getRot", List.of(),
                     "getVel", List.of(),
-                    "radar", List.of()
+                    "radar", List.of(),
+                    "send", List.of("name_id", "message"),
+                    "read", List.of(),
+                    "clear", List.of()
             ),
             "bigc", Map.of(
                     "aimangel", List.of("pitch", "yaw"),

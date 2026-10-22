@@ -11,6 +11,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderers;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.InteractionHand;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
@@ -32,6 +33,7 @@ import net.tui.aerocomputers.renderer.HudDisplayRenderer;
 import net.tui.aerocomputers.screen.ModMenuTypes;
 import net.tui.aerocomputers.screen.custom.BoardComputerScreen;
 import net.tui.aerocomputers.screen.custom.HudDisplayScreen;
+import net.tui.aerocomputers.screen.custom.HudScreen;
 import net.tui.aerocomputers.screen.custom.WeaponLinkerScreen;
 
 // This class will not load on dedicated servers. Accessing client side code from here is safe.

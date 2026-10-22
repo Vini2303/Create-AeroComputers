@@ -1,8 +1,5 @@
 package net.tui.aerocomputers.block.entity;
 
-import com.defpwoq.createarms.block.ChinGunBlockEntity;
-import com.defpwoq.createarms.block.MFDControllerBlockEntity;
-import com.defpwoq.createarms.util.SableHelper;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.redstone.link.LinkBehaviour;
@@ -12,9 +9,6 @@ import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.companion.SableCompanion;
-import dev.ryanhcode.sable.companion.SubLevelAccess;
-import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
@@ -25,13 +19,11 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.lang.LanguageSpec;
@@ -43,7 +35,6 @@ import net.tui.aerocomputers.lang.TokenType;
 import net.tui.aerocomputers.screen.custom.BoardComputerMenu;
 import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Matrix4d;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
@@ -194,6 +185,12 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     private final Map<String, Command> commands = new LinkedHashMap<>();
+
+    private final List<String> messages = new ArrayList<>();
+
+    public void sendMessage(String message) {
+        messages.add(message);
+    }
 
     public @Nullable Command getCommand(String name) {
         return commands.get(name);
@@ -577,6 +574,22 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             issueCommand("slrw.aimchinpos", pos.get(0), pos.get(1), pos.get(2));
             return 0.0;
         });
+        builtins.put("aero.send", args -> {
+            String name_id = args.size() > 0 ? args.get(0).toString() : "";
+            String message = args.size() > 1 ? args.get(1).toString() : "";
+            ComputerRegistry.get(name_id).sendMessage(message);
+            return 0.0;
+        });
+        builtins.put("aero.read", args -> {
+            if (this.messages.isEmpty()) {
+                return "";
+            }
+            return this.messages.remove(0);
+        });
+        builtins.put("aero.clear", args -> {
+            this.messages.clear();
+            return 0.0;
+        });
     }
 
 
@@ -654,6 +667,8 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     public void tick() {
         super.tick();
         printsThisTick = 0;
+
+        AeroComputers.LOGGER.info(this.messages.toString());
 
 
         if (!subLevelSeenThisCycle) {

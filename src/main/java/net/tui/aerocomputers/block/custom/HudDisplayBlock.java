@@ -2,7 +2,6 @@ package net.tui.aerocomputers.block.custom;
 
 import com.mojang.serialization.MapCodec;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -88,7 +87,7 @@ public class HudDisplayBlock extends HorizontalDirectionalBlock implements Entit
 
     @Override
     public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-        if(Screen.hasShiftDown()) {
+        if(true) {
             tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.hud_display_shift"));
         } else {
             tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.pressshift"));
