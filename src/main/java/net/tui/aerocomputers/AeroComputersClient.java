@@ -18,14 +18,12 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import net.neoforged.neoforge.client.event.EntityRenderersEvent;
-import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
-import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
-import net.neoforged.neoforge.client.event.RegisterNamedRenderTypesEvent;
+import net.neoforged.neoforge.client.event.*;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
+import net.tui.aerocomputers.client.CameraFeed;
 import net.tui.aerocomputers.client.HudOverlay;
 import net.tui.aerocomputers.renderer.BoardComputerRenderer;
 import net.tui.aerocomputers.renderer.BoardComputerVisual;
@@ -92,5 +90,20 @@ public class AeroComputersClient {
                 return true;
             }
         });
+    }
+
+    @SubscribeEvent
+    public static void onFramePre(RenderFrameEvent.Pre event) {
+        CameraFeed.renderIfRequested();
+    }
+
+    @SubscribeEvent
+    public static void onFov(ViewportEvent.ComputeFov event) {
+        if (CameraFeed.rendering) event.setFOV(CameraFeed.fov);
+    }
+
+    @SubscribeEvent
+    public static void onClientTick(ClientTickEvent.Post event) {
+        CameraFeed.onClientTick();
     }
 }

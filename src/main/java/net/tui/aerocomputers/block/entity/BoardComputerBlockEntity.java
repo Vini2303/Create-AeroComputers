@@ -661,15 +661,22 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             markDrawDirty();
             return wrapDrawObject(obj);
         });
+        nativeClasses.put("hud.Cam", args -> {
+            DrawObject obj = new DrawObject();
+            obj.x = args.size() > 0 ? toNumber(args.get(0)) : 0;
+            obj.y = args.size() > 1 ? toNumber(args.get(1)) : 0;
+            obj.w = args.size() > 2 ? toNumber(args.get(2)) : 0;
+            obj.h = args.size() > 3 ? toNumber(args.get(3)) : 0;
+            drawObjects.add(obj);
+            markDrawDirty();
+            return wrapDrawObject(obj);
+        });
     }
 
     @Override
     public void tick() {
         super.tick();
         printsThisTick = 0;
-
-        AeroComputers.LOGGER.info(this.messages.toString());
-
 
         if (!subLevelSeenThisCycle) {
             currentSubLevel = null;

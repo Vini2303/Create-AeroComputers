@@ -1,17 +1,22 @@
 package net.tui.aerocomputers.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.phys.Vec3;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.item.ModItems;
 import net.tui.aerocomputers.network.HudEntryPayload;
+import org.joml.Matrix4f;
 
 import java.util.List;
 
@@ -37,6 +42,7 @@ public class HudOverlay implements LayeredDraw.Layer {
                 case "line" -> renderLine(guiGraphics, e);
                 case "rect" -> renderRect(guiGraphics, e);
                 case "poly" -> renderPoly(guiGraphics, e);
+                case "cam" -> renderCamera(guiGraphics, e);
             }
         }
     }
@@ -106,5 +112,29 @@ public class HudOverlay implements LayeredDraw.Layer {
             );
             renderLine(g, lineEntry);
         }
+    }
+
+    private void renderCamera(GuiGraphics g, ClientHudRegistry.DrawEntry e) {
+        // convention: xs = [worldX, worldY, worldZ], ys = [yaw, pitch, fov]
+        CameraFeed.request(
+                new Vec3(e.xs().get(0), e.xs().get(1), e.xs().get(2)),
+                e.ys().get(0).floatValue(), e.ys().get(1).floatValue(), e.ys().get(2).floatValue());
+
+        var target = CameraFeed.getTarget();
+        if (target == null) return;   // first frame, nothing rendered yet
+
+        float x = (float) e.x(), y = (float) e.y(), w = (float) e.w(), h = (float) e.h();
+
+        RenderSystem.setShader(GameRenderer::getPositionTexShader);
+        RenderSystem.setShaderTexture(0, target.getColorTextureId());
+        RenderSystem.setShaderColor(1, 1, 1, 1);
+
+        Matrix4f m = g.pose().last().pose();
+        BufferBuilder b = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
+        b.addVertex(m, x,     y + h, 0).setUv(0, 0);
+        b.addVertex(m, x + w, y + h, 0).setUv(1, 0);
+        b.addVertex(m, x + w, y,     0).setUv(1, 1);
+        b.addVertex(m, x,     y,     0).setUv(0, 1);
+        BufferUploader.drawWithShader(b.buildOrThrow());
     }
 }

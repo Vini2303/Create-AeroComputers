@@ -81,7 +81,8 @@ public final class LanguageSpec {
                     "Label", List.of("x", "y", "text", "color", "font_size"),
                     "Line", List.of("x1", "y1", "x2", "y2", "width", "color"),
                     "Rect", List.of("x", "y", "w", "h", "border_width", "center_color", "border_color", "render_center", "render_border"),
-                    "Poly", List.of("xs", "ys", "border_width", "border_color")
+                    "Poly", List.of("xs", "ys", "border_width", "border_color"),
+                    "Cam", List.of("x", "y", "width", "height")
             )
     );
 

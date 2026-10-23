@@ -13,6 +13,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 import net.tui.aerocomputers.block.custom.HudDisplayBlock;
 import net.tui.aerocomputers.block.entity.HudDisplayBlockEntity;
+import net.tui.aerocomputers.client.CameraFeed;
 import net.tui.aerocomputers.client.ClientHudRegistry;
 import net.tui.aerocomputers.network.BoardComputerChannelPayload;
 import org.joml.Matrix4f;
@@ -157,6 +158,13 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
                 );
 
                 case "poly" -> renderPoly(
+                        poseStack,
+                        bufferSource,
+                        e,
+                        packedLight
+                );
+
+                case "cam" -> renderCamera(
                         poseStack,
                         bufferSource,
                         e,
@@ -531,6 +539,24 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
                 0
         ).setColor(r, g, b, a);
     }
+
+    private void renderCamera(PoseStack ps, MultiBufferSource buf, ClientHudRegistry.DrawEntry e, int light) {
+        CameraFeed.request(new Vec3(e.xs().get(0), e.xs().get(1), e.xs().get(2)),
+                e.ys().get(0).floatValue(), e.ys().get(1).floatValue(), e.ys().get(2).floatValue());
+        if (CameraFeed.getTarget() == null) return;
+
+        VertexConsumer vc = buf.getBuffer(RenderType.text(CameraFeed.TEXTURE_ID));
+        Matrix4f m = ps.last().pose();
+        float x1 = (float) e.x(), y1 = (float) e.y();
+        float x2 = x1 + (float) e.w(), y2 = y1 + (float) e.h();
+
+        // your poseStack has a flipped Y (scale(SCALE, -SCALE)), so y1 is the top -> v = 1
+        vc.addVertex(m, x1, y2, 0).setColor(255,255,255,255).setUv(0, 0).setLight(light);
+        vc.addVertex(m, x2, y2, 0).setColor(255,255,255,255).setUv(1, 0).setLight(light);
+        vc.addVertex(m, x2, y1, 0).setColor(255,255,255,255).setUv(1, 1).setLight(light);
+        vc.addVertex(m, x1, y1, 0).setColor(255,255,255,255).setUv(0, 1).setLight(light);
+    }
+
 
     public static int fromRGBA(int r, int g, int b, int a) {
         return (r << 16) + (g << 8) + b + (a << 24);
