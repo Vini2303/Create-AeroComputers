@@ -19,6 +19,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -33,6 +34,7 @@ import net.tui.aerocomputers.lang.ProgramInfo;
 import net.tui.aerocomputers.lang.Token;
 import net.tui.aerocomputers.lang.TokenType;
 import net.tui.aerocomputers.screen.custom.BoardComputerMenu;
+import net.tui.aerocomputers.network.CameraChunkManager;
 import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaterniond;
@@ -663,6 +665,8 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         });
         nativeClasses.put("hud.Cam", args -> {
             DrawObject obj = new DrawObject();
+            obj.id = "d" + (drawObjectIdCounter++);
+            obj.type = "cam";
             obj.x = args.size() > 0 ? toNumber(args.get(0)) : 0;
             obj.y = args.size() > 1 ? toNumber(args.get(1)) : 0;
             obj.w = args.size() > 2 ? toNumber(args.get(2)) : 0;
@@ -685,6 +689,9 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
         if (level == null || level.isClientSide)
             return;
+
+        if (level instanceof ServerLevel sl && drawObjects.stream().anyMatch(o -> "cam".equals(o.type)))
+            CameraChunkManager.tick(sl);
 
         int rpm = (int) Math.abs(getSpeed());
 

@@ -541,20 +541,21 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
     }
 
     private void renderCamera(PoseStack ps, MultiBufferSource buf, ClientHudRegistry.DrawEntry e, int light) {
-        CameraFeed.request(new Vec3(e.xs().get(0), e.xs().get(1), e.xs().get(2)),
-                e.ys().get(0).floatValue(), e.ys().get(1).floatValue(), e.ys().get(2).floatValue());
-        if (CameraFeed.getTarget() == null) return;
+        if (CameraFeed.rendering) return;   // never sample the texture we're drawing into
+
+        CameraFeed.requestFixed();
+        if (CameraFeed.getTarget() == null) return;   // first frame(s): nothing rendered yet
 
         VertexConsumer vc = buf.getBuffer(RenderType.text(CameraFeed.TEXTURE_ID));
         Matrix4f m = ps.last().pose();
         float x1 = (float) e.x(), y1 = (float) e.y();
         float x2 = x1 + (float) e.w(), y2 = y1 + (float) e.h();
+        int full = 0xF000F0;   // fullbright
 
-        // your poseStack has a flipped Y (scale(SCALE, -SCALE)), so y1 is the top -> v = 1
-        vc.addVertex(m, x1, y2, 0).setColor(255,255,255,255).setUv(0, 0).setLight(light);
-        vc.addVertex(m, x2, y2, 0).setColor(255,255,255,255).setUv(1, 0).setLight(light);
-        vc.addVertex(m, x2, y1, 0).setColor(255,255,255,255).setUv(1, 1).setLight(light);
-        vc.addVertex(m, x1, y1, 0).setColor(255,255,255,255).setUv(0, 1).setLight(light);
+        vc.addVertex(m, x1, y2, 0).setColor(255, 255, 255, 255).setUv(0, 0).setLight(full);
+        vc.addVertex(m, x2, y2, 0).setColor(255, 255, 255, 255).setUv(1, 0).setLight(full);
+        vc.addVertex(m, x2, y1, 0).setColor(255, 255, 255, 255).setUv(1, 1).setLight(full);
+        vc.addVertex(m, x1, y1, 0).setColor(255, 255, 255, 255).setUv(0, 1).setLight(full);
     }
 
 

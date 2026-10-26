@@ -3,7 +3,9 @@ package net.tui.aerocomputers.network;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.tui.aerocomputers.AeroComputers;
+import net.tui.aerocomputers.client.CameraFeed;
 
 public class ModNetworking {
 
@@ -58,5 +60,35 @@ public class ModNetworking {
                 WeaponLinkerEntryPayload::handle
         );
 
+        registrar.playToClient(
+                CameraChunkPayload.TYPE,
+                CameraChunkPayload.STREAM_CODEC,
+                ClientPayloads::handleCameraChunk
+        );
+
+        registrar.playToClient(
+                CameraEntitiesPayload.TYPE,
+                CameraEntitiesPayload.STREAM_CODEC,
+                ClientPayloads::handleCameraEntities
+        );
+        registrar.playToClient(
+                CameraBlocksPayload.TYPE,
+                CameraBlocksPayload.STREAM_CODEC,
+                ClientPayloads::handleCameraBlocks
+        );
+
+    }
+
+    public final class ClientPayloads {
+        public static void handleCameraChunk(CameraChunkPayload p, IPayloadContext ctx) {
+            ctx.enqueueWork(() -> CameraFeed.acceptChunk(p.packet()));
+        }
+
+        public static void handleCameraEntities(CameraEntitiesPayload p, IPayloadContext ctx) {
+            ctx.enqueueWork(() -> CameraFeed.acceptEntities(p.entities()));
+        }
+        public static void handleCameraBlocks(CameraBlocksPayload p, IPayloadContext ctx) {
+            ctx.enqueueWork(() -> CameraFeed.acceptBlocks(p.changes()));
+        }
     }
 }

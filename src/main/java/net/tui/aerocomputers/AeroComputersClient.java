@@ -87,7 +87,7 @@ public class AeroComputersClient {
 
             @Override
             public boolean skipVanillaRender(BoardComputerBlockEntity blockEntity) {
-                return true;
+                return !CameraFeed.isCameraLevel(blockEntity.getLevel());
             }
         });
     }
