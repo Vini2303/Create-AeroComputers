@@ -134,8 +134,22 @@ repositories {
 dependencies {
     implementation("net.createmod.ponder:ponder-neoforge:1.0.82+mc1.21.1")
 
-    implementation("org.graalvm.polyglot:polyglot:25.3.4.1")
-    implementation("org.graalvm.python:python-embedding:25.3.4.1")
+    // GraalPy
+    jarJar(implementation("org.graalvm.polyglot:polyglot:25.3.4.1")) {
+        version {
+            prefer "25.3.4.1"
+        }
+    }
+
+    jarJar(implementation("org.graalvm.python:python-embedding:25.3.4.1")) {
+        version {
+            prefer "25.3.4.1"
+        }
+    }
+
+// Required for Minecraft 1.21.1 development runs
+    additionalRuntimeClasspath("org.graalvm.polyglot:polyglot:25.3.4.1")
+    additionalRuntimeClasspath("org.graalvm.python:python-embedding:25.3.4.1")
 
     // GEÄNDERT: Von compileOnly zu implementation gewechselt
     implementation files("run/mods/create-1.21.1-6.0.10.jar")

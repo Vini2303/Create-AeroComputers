@@ -1,33 +1,76 @@
 package net.tui.aerocomputers.script;
 
-import org.graalvm.polyglot.HostAccess;
 import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
+import org.graalvm.polyglot.Value;
+import org.graalvm.polyglot.proxy.ProxyExecutable;
+import org.graalvm.polyglot.proxy.ProxyObject;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/** Explicit, narrow Python-facing API. No Java classes or arbitrary host objects are exposed. */
 public final class AeroScriptApi {
-
     private final BoardComputerBlockEntity computer;
+    private final ProxyObject proxy;
 
     public AeroScriptApi(BoardComputerBlockEntity computer) {
         this.computer = computer;
+        Map<String, Object> members = new LinkedHashMap<>();
+        members.put("getPos", call(args -> computer.scriptGetPos()));
+        members.put("getRot", call(args -> computer.scriptGetRot()));
+        members.put("getVel", call(args -> computer.scriptGetVel()));
+        members.put("radar", call(args -> computer.scriptRadar()));
+        members.put("send", call(args -> computer.scriptSend(stringArg(args, 0), stringArg(args, 1))));
+        members.put("read", call(args -> computer.scriptRead()));
+        members.put("clear", call(args -> computer.scriptClear()));
+        Map<String, Object> bigc = new LinkedHashMap<>();
+        bigc.put("aimangel", call(args -> computer.scriptCommand("bigc.aimangel", args)));
+        bigc.put("fire", call(args -> computer.scriptCommand("bigc.fire", args)));
+        bigc.put("aimpos", call(args -> computer.scriptCommand("bigc.aimpos", args)));
+        members.put("bigc", ProxyObject.fromMap(bigc));
+
+        Map<String, Object> slrw = new LinkedHashMap<>();
+        slrw.put("firechin", call(args -> computer.scriptCommand("slrw.firechin", args)));
+        slrw.put("aimchinangel", call(args -> computer.scriptCommand("slrw.aimchinangel", args)));
+        slrw.put("aimchinpos", call(args -> computer.scriptCommand("slrw.aimchinpos", args)));
+        members.put("slrw", ProxyObject.fromMap(slrw));
+        proxy = ProxyObject.fromMap(members);
     }
 
-    @HostAccess.Export
-    public Object getPos() {
-        return computer.scriptGetPos();
+    public Object asProxy() {
+        return proxy;
     }
 
-    @HostAccess.Export
-    public Object getRot() {
-        return computer.scriptGetRot();
+    private interface Invocation {
+        Object run(List<Object> args);
     }
 
-    @HostAccess.Export
-    public Object getVel() {
-        return computer.scriptGetVel();
+    private static ProxyExecutable call(Invocation invocation) {
+        return values -> {
+            List<Object> args = new ArrayList<>();
+            for (Value value : values) args.add(convert(value));
+            return invocation.run(args);
+        };
     }
 
-    @HostAccess.Export
-    public Object radar() {
-        return computer.scriptRadar();
+    private static String stringArg(List<Object> args, int index) {
+        return index < args.size() && args.get(index) != null ? args.get(index).toString() : "";
+    }
+
+    private static Object convert(Value value) {
+        if (value == null || value.isNull()) return null;
+        if (value.isBoolean()) return value.asBoolean();
+        if (value.isString()) return value.asString();
+        if (value.fitsInInt()) return value.asInt();
+        if (value.fitsInLong()) return value.asLong();
+        if (value.fitsInDouble()) return value.asDouble();
+        if (value.hasArrayElements()) {
+            List<Object> list = new ArrayList<>();
+            for (long i = 0; i < value.getArraySize(); i++) list.add(convert(value.getArrayElement(i)));
+            return list;
+        }
+        return value.toString();
     }
 }
