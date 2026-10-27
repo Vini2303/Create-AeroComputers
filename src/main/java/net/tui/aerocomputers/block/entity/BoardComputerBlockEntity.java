@@ -45,7 +45,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     public List<List<Double>> getAllSubLevelPositions() {
         List<List<Double>> allPositions = new ArrayList<>();
 
-        if (this.level == null) {
+        if (this.level == null || currentSubLevel == null) {
             return allPositions;
         }
 
@@ -83,12 +83,13 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
 
     private static final int PYTHON_STEPS_PER_TICK = 64;
-    private static final long PYTHON_BUDGET_NANOS = 1_000_000L;
+    private static final double PYTHON_BUDGET_SECONDS = 0.001; // 1 ms per tick
+    /** HUD changes are pushed to clients at most every N ticks. */
+    private static final int HUD_SYNC_INTERVAL_TICKS = 3;
 
-    // GraalPy runtime state. The old tokenizer/parser/evaluator are not used.
+    // GraalPy runtime state. Created lazily in runPythonSteps(), only while not paused.
     private @Nullable PythonScriptRuntime pythonRuntime;
     private @Nullable HudScriptApi hudScriptApi;
-    private @Nullable String runtimeProgram;
     private @Nullable String pythonError;
 
     private int transmittedSignal;
@@ -127,11 +128,9 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     private LinkBehaviour[] outputLinks;
 
 
-
-
     private static class DrawObject {
         String id;
-        String type; // "label", "line", "poly", "rect"
+        String type; // "label", "line", "poly", "rect", "cam"
         double x, y, x2, y2, w, h;
         String text = "";
         double fontSize = 1.0;
@@ -209,22 +208,22 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     public void setProgram(String text) {
-        program = text == null ? "" : text;
+        String newProgram = text == null ? "" : text;
+        // The screen sends its contents when it closes. Avoid restarting the
+        // runtime when the saved text has not actually changed.
+        if (Objects.equals(program, newProgram)) {
+            return;
+        }
+        program = newProgram;
         variables.clear();
-        resetPythonRuntime();
+        // Lazy: tick() starts the new program, but only while the computer is not paused.
+        closePythonRuntime();
+        pythonError = null;
 
         editorCompletionUpdateId++;
 
         setChanged();
-
-        if (level != null && !level.isClientSide) {
-            level.sendBlockUpdated(
-                    worldPosition,
-                    getBlockState(),
-                    getBlockState(),
-                    3
-            );
-        }
+        sync();
     }
 
     @Override
@@ -292,11 +291,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
     @Override
     public @Nullable AbstractContainerMenu createMenu(int i, Inventory playerInventory, Player player) {
-        if (level != null && !level.isClientSide && running
-                && pythonRuntime != null && pythonRuntime.isFinished()
-                && program != null && !program.isBlank()) {
-            restart();
-        }
         return new BoardComputerMenu(i, playerInventory, this);
     }
 
@@ -331,7 +325,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         if (pythonRuntime != null || level == null || level.isClientSide) return;
         hudScriptApi = new HudScriptApi(this);
         pythonRuntime = new PythonScriptRuntime(new AeroScriptApi(this), hudScriptApi.asProxy(), this::onPythonPrint);
-        runtimeProgram = null;
     }
 
     private void closePythonRuntime() {
@@ -344,15 +337,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         }
         pythonRuntime = null;
         hudScriptApi = null;
-        runtimeProgram = null;
-    }
-
-    private void resetPythonRuntime() {
-        closePythonRuntime();
-        if (level != null && !level.isClientSide) {
-            ensurePythonRuntime();
-            startPythonProgram();
-        }
     }
 
     private void startPythonProgram() {
@@ -369,7 +353,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                 }
             }
             pythonRuntime.start(program);
-            runtimeProgram = program;
             pythonError = null;
         } catch (RuntimeException exception) {
             pythonError = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
@@ -379,35 +362,25 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
     private void runPythonSteps(int maxSteps) {
         if (!running || program == null || program.isBlank()) return;
-        ensurePythonRuntime();
-        if (pythonRuntime == null) return;
-        // Refresh hardware inputs before each cooperative Python step.
+
+        // Lazy (re)start: only happens while the computer is running.
+        if (pythonRuntime == null) {
+            ensurePythonRuntime();
+            startPythonProgram();
+        }
+        if (pythonRuntime == null || pythonRuntime.isFinished()) return;
+
+        // Refresh hardware inputs before stepping.
         for (IOChannel channel : inputChannels) {
             if (channel.variableName == null || channel.variableName.isBlank()) continue;
             double value = channel.mode == SignalMode.B
                     ? (channel.value > 0 ? 1.0 : 0.0) : channel.value;
             pythonRuntime.setVariable(channel.variableName, value);
         }
-        if (!Objects.equals(runtimeProgram, program)) {
-            closePythonRuntime();
-            ensurePythonRuntime();
-            startPythonProgram();
-        }
-        if (pythonRuntime == null || pythonRuntime.isFinished()) {
-            return;
-        }
 
-        long startedAt = System.nanoTime();
-        int steps = 0;
         try {
-            while (steps < maxSteps && System.nanoTime() - startedAt < PYTHON_BUDGET_NANOS) {
-                if (!pythonRuntime.step()) {
-                    // Script completed. Keep the computer enabled; the runtime
-                    // remains finished until the player restarts it or the code changes.
-                    break;
-                }
-                steps++;
-            }
+            // One host->guest call; the stepping loop runs inside Python.
+            pythonRuntime.step(maxSteps, PYTHON_BUDGET_SECONDS);
         } catch (RuntimeException exception) {
             pythonError = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
             AeroComputers.LOGGER.error("Python script error at {}: {}", worldPosition, pythonError, exception);
@@ -415,24 +388,27 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         }
     }
 
+    /** Only reads what Java actually needs: output channels and persistent variables. */
     private void syncPythonVariables() {
         if (pythonRuntime == null) return;
-        for (String name : pythonRuntime.getVariableNames()) {
-            if (name == null || name.isBlank()) continue;
+
+        for (IOChannel ch : outputChannels) {
+            if (ch.variableName == null || ch.variableName.isBlank()) continue;
             try {
-                Object value = pythonRuntime.getVariable(name);
-                if (value == null) continue;
-                // Avoid copying opaque proxy objects (for example HUD labels) into
-                // the legacy numeric-variable map.
-                if (value instanceof Number || value instanceof String || value instanceof Boolean
-                        || value instanceof List<?>) {
-                    variables.put(name, value);
-                    if (persistentVariables.containsKey(name)) {
-                        persistentVariables.put(name, value);
-                    }
+                Object v = pythonRuntime.getVariable(ch.variableName);
+                if (v instanceof Number || v instanceof Boolean) variables.put(ch.variableName, v);
+            } catch (RuntimeException ignored) {
+            }
+        }
+
+        for (String name : persistentVariables.keySet()) {
+            try {
+                Object v = pythonRuntime.getVariable(name);
+                if (v instanceof Number || v instanceof String || v instanceof Boolean) {
+                    persistentVariables.put(name, v);
+                    variables.put(name, v);
                 }
             } catch (RuntimeException ignored) {
-                // Internal/runtime globals may not be representable as Java values.
             }
         }
     }
@@ -620,7 +596,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
 
-
     @Override
     public void sable$tick(ServerSubLevel subLevel) {
         this.currentSubLevel = subLevel;
@@ -640,7 +615,8 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         if (level == null || level.isClientSide)
             return;
 
-        if (level instanceof ServerLevel sl && drawObjects.stream().anyMatch(o -> "cam".equals(o.type)))
+        if (level instanceof ServerLevel sl && !drawObjects.isEmpty()
+                && drawObjects.stream().anyMatch(o -> "cam".equals(o.type)))
             CameraChunkManager.tick(sl);
 
         int rpm = (int) Math.abs(getSpeed());
@@ -648,90 +624,40 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         if (rpm < 128)
             return;
 
+        // Paused: no runtime is created and nothing is executed.
         if (!running)
             return;
 
-        for (IOChannel ch : inputChannels) {
-            double val = ch.mode == SignalMode.B ? (ch.value > 0 ? 1.0 : 0.0) : ch.value;
-            variables.put(ch.variableName, val);
-        }
-
-        if (rpm < 256) {
-            double chance = rpm / 256.0;
-            if (level.random.nextDouble() < chance) {
-                runPythonSteps(1);
-            }
-        } else {
-            runPythonSteps(PYTHON_STEPS_PER_TICK);
-        }
+        // Interpolate execution speed from 1 step/tick at 128 RPM
+        // to the maximum step count at 256 RPM. At and above 256 RPM,
+        // always request the maximum amount of work each tick.
+        int steps = rpm >= 256
+                ? PYTHON_STEPS_PER_TICK
+                : 1 + (int) Math.floor((rpm - 128) * (PYTHON_STEPS_PER_TICK - 1) / 128.0);
+        steps = Math.max(1, Math.min(PYTHON_STEPS_PER_TICK, steps));
+        runPythonSteps(steps);
 
         syncPythonVariables();
 
         for (IOChannel ch : outputChannels) {
             Object raw = variables.getOrDefault(ch.variableName, 0.0);
             double num = asDouble(raw);
-            ch.value = ch.mode == SignalMode.B
+            int newValue = ch.mode == SignalMode.B
                     ? (num > 0 ? 15 : 0)
                     : (int) Math.max(0, Math.min(15, num));
-        }
-
-        for (IOChannel ch : outputChannels) {
-            if (outputLinks[ch.slot] != null) {
+            boolean changed = newValue != ch.value;
+            ch.value = newValue;
+            if (changed && outputLinks[ch.slot] != null) {
                 outputLinks[ch.slot].notifySignalChange();
             }
         }
 
-
-        if (hudDirty) {
+        // Throttled: sending the whole block entity NBT every tick is expensive.
+        if (hudDirty && level.getGameTime() % HUD_SYNC_INTERVAL_TICKS == 0) {
             hudDirty = false;
             notifyUpdate();
         }
     }
-
-
-
-
-
-
-
-    /**
-     * Uses the shared analyzer (the same one the editor uses) to find blocks,
-     * functions and classes.
-     */
-
-    /** Removes a trailing "# comment" (using the shared lexer, so '#' inside strings is kept). */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    /**
-     * Expression tokenizer. Uses the shared lossless lexer and just drops what the
-     * expression parser doesn't care about.
-     */
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     // These are Java/Python boundary conversions, not a Python parser or evaluator.
@@ -775,9 +701,8 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         if (this.level != null && !this.level.isClientSide) {
             ComputerRegistry.register(computerName, this);
             closePythonRuntime();
-            ensurePythonRuntime();
             running = true; // Reloading the computer automatically resumes its program.
-            if (program != null && !program.isBlank()) startPythonProgram();
+            // The runtime is started lazily by tick().
         }
     }
 
@@ -805,24 +730,21 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         sync();
     }
 
+    /**
+     * Restarts the program from the beginning. Does NOT change the pause state:
+     * a paused computer stays paused and starts fresh once it is resumed.
+     */
     public void restart() {
-        running = true;
         variables.clear();
-        closePythonRuntime();
+        closePythonRuntime();   // tick() starts a new runtime lazily, only if running
         drawObjects.clear();
         commands.clear();
         drawObjectIdCounter = 0;
         pythonError = null;
-        if (level != null && !level.isClientSide) {
-            ensurePythonRuntime();
-            startPythonProgram();
-        }
+        hudDirty = true;
         setChanged();
-        if (level != null && !level.isClientSide) {
-            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
-        }
+        sync();
     }
-
 
 
     public void addPersistentVariable(String name) {
@@ -865,9 +787,9 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         for (var entry : persistentVariables.entrySet()) {
             CompoundTag varTag = new CompoundTag();
             Object value = entry.getValue();
-            if (value instanceof Double d) {
+            if (value instanceof Number n) {
                 varTag.putString("type", "double");
-                varTag.putDouble("value", d);
+                varTag.putDouble("value", n.doubleValue());
             } else if (value instanceof Boolean b) {
                 varTag.putString("type", "boolean");
                 varTag.putBoolean("value", b);
@@ -1171,7 +1093,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
 
-
     private CompoundTag writeDrawObjects() {
         ListTag listTag = new ListTag();
         for (DrawObject o : drawObjects) {
@@ -1256,12 +1177,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
 
-
-
-
-
-
-
     /**
      * The editor derives functions/classes/variables from the program text itself
      * (via the shared ProgramAnalyzer). The only thing it cannot know is what lives
@@ -1288,7 +1203,5 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     public record EditorCompletions(List<String> extraVariables) {}
-
-
 
 }

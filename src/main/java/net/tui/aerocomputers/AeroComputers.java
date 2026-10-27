@@ -4,6 +4,7 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.tui.aerocomputers.block.ModBlocks;
 import net.tui.aerocomputers.block.entity.ComputerRegistry;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
+import net.tui.aerocomputers.config.AeroComputersConfig;
 import net.tui.aerocomputers.item.ModCreativeModeTabs;
 import net.tui.aerocomputers.item.ModItems;
 import net.tui.aerocomputers.network.ModNetworking;
@@ -45,7 +46,7 @@ public class AeroComputers {
         modEventBus.addListener(this::addCreative);
 
         // Register our mod's ModConfigSpec so that FML can create and load the config file for us
-        modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        modContainer.registerConfig(ModConfig.Type.COMMON, AeroComputersConfig.SPEC);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

@@ -337,14 +337,6 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
                 )
         );
 
-        PacketDistributor.sendToServer(
-                new BoardComputerControlPayload(
-                        menu.blockEntity.getBlockPos(),
-                        BoardComputerControlPayload.Action.RESTART,
-                        ""
-                )
-        );
-
         String variables = menu.blockEntity.getPersistentVariablesSnapshot()
                 .entrySet()
                 .stream()
@@ -711,20 +703,13 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
 
     @Override
     public void removed() {
-        PacketDistributor.sendToServer(
-                new BoardComputerEditPayload(
-                        menu.blockEntity.getBlockPos(),
-                        editor.getText()
-                )
-        );
+        PacketDistributor.sendToServer(new BoardComputerEditPayload(
+                menu.blockEntity.getBlockPos(), editor.getText()));
 
-        PacketDistributor.sendToServer(
-                new BoardComputerControlPayload(
-                        menu.blockEntity.getBlockPos(),
-                        BoardComputerControlPayload.Action.RESTART,
-                        ""
-                )
-        );
+        PacketDistributor.sendToServer(new BoardComputerControlPayload(
+                menu.blockEntity.getBlockPos(),
+                BoardComputerControlPayload.Action.RESTART,
+                ""));
 
         super.removed();
     }

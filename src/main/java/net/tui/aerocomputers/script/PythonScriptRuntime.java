@@ -1,28 +1,42 @@
 package net.tui.aerocomputers.script;
 
+import net.tui.aerocomputers.config.AeroComputersConfig;
 import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.Engine;
 import org.graalvm.polyglot.HostAccess;
+import org.graalvm.polyglot.ResourceLimits;
 import org.graalvm.polyglot.Value;
 
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
 /**
  * A persistent, cooperative GraalPy runtime.
  *
  * Scripts are transformed into a generator. Each call to step() advances
- * execution through one or more Python statements, allowing the Minecraft
- * server tick to regain control between statements.
+ * execution through up to N Python statements (inside Python, in ONE host call),
+ * allowing the Minecraft server tick to regain control between ticks.
  */
 public final class PythonScriptRuntime implements AutoCloseable {
+
+    /** One engine shared by every computer: compiled code and warmup are reused. */
+    private static final Engine ENGINE = Engine.newBuilder()
+            .option("engine.WarnInterpreterOnly", "false")
+            .build();
+
+    /** Safety net for code that is not stepped cooperatively (bodies of def, while True in functions...). */
+    private static final long STATEMENT_LIMIT = 50_000L;
+
     private final Context context;
+    private final Value startFn;
+    private final Value stepFn;
+    private final Value bindings;
     private boolean started;
     private boolean finished;
     private final Consumer<String> output;
@@ -31,13 +45,16 @@ public final class PythonScriptRuntime implements AutoCloseable {
         def _aero_make_runtime():
             import ast as _aero_ast
             import builtins as _aero_builtins
+            import time as _aero_time
 
+            _aero_perf = _aero_time.perf_counter
             _aero_original_import = _aero_builtins.__import__
             _aero_exec = _aero_builtins.exec
             _aero_compile = _aero_builtins.compile
             _aero_next = _aero_builtins.next
             _aero_globals = _aero_builtins.globals
-            _aero_allowed_imports = {"math"}
+            _aero_StopIteration = _aero_builtins.StopIteration
+            _aero_allowed_imports = set(_aero_allowed_imports_config.split(","))
 
             def _aero_safe_import(name, globals=None, locals=None, fromlist=(), level=0):
                 root = name.split(".")[0]
@@ -52,7 +69,9 @@ public final class PythonScriptRuntime implements AutoCloseable {
                     "int", "isinstance", "len", "list", "max", "min", "range",
                     "round", "str", "sum", "tuple", "zip", "print", "Exception",
                     "ValueError", "TypeError", "IndexError", "KeyError", "RuntimeError",
-                    "set", "sorted", "SyntaxError", "ImportError", "StopIteration"
+                    "set", "sorted", "SyntaxError", "ImportError", "StopIteration",
+                    "__build_class__", "object", "super", "property", "staticmethod", "classmethod",
+                    "hasattr", "AttributeError", "NotImplementedError"
                 )
             }
             _aero_safe_builtins["__import__"] = _aero_safe_import
@@ -65,7 +84,9 @@ public final class PythonScriptRuntime implements AutoCloseable {
                 def visit_AsyncFunctionDef(self, node):
                     raise SyntaxError("async functions are not supported")
                 def visit_ClassDef(self, node):
-                    raise SyntaxError("class definitions are not supported")
+                    # The class body runs once at definition time (not stepped);
+                    # its methods are normal functions.
+                    return node
                 def visit_Lambda(self, node):
                     return node
                 def visit_Yield(self, node):
@@ -127,7 +148,8 @@ public final class PythonScriptRuntime implements AutoCloseable {
                     # Function names are globals; function internals remain local.
                     self.names.add(node.name)
                 def visit_ClassDef(self, node):
-                    raise SyntaxError("class definitions are not supported")
+                    # the class name is a global; names inside the class body stay local to it
+                    self.names.add(node.name)
                 def visit_Name(self, node):
                     if node.id.startswith("_aero_"):
                         raise SyntaxError("Names beginning with _aero_ are reserved")
@@ -164,21 +186,29 @@ public final class PythonScriptRuntime implements AutoCloseable {
                 _aero_globals()["_aero_generator"] = _aero_globals()["_aero_script_main"]()
                 _aero_globals()["_aero_finished"] = False
 
-            def _aero_step():
-                if _aero_globals().get("_aero_finished", True):
+            def _aero_step_n(n, budget):
+                g = _aero_globals()
+                if g.get("_aero_finished", True):
                     return False
-                try:
-                    _aero_next(_aero_globals()["_aero_generator"])
-                    return True
-                except StopIteration:
-                    _aero_globals()["_aero_finished"] = True
-                    return False
+                gen = g["_aero_generator"]
+                deadline = _aero_perf() + budget
+                i = 0
+                while i < n:
+                    try:
+                        _aero_next(gen)
+                    except _aero_StopIteration:
+                        g["_aero_finished"] = True
+                        return False
+                    i += 1
+                    if (i & 7) == 0 and _aero_perf() > deadline:
+                        break
+                return True
 
             def _aero_get_names():
                 return [k for k in _aero_globals().keys() if not k.startswith("_aero_") and k not in ("aero", "hud", "__builtins__")]
-            return _aero_start, _aero_step, _aero_get_names
+            return _aero_start, _aero_step_n, _aero_get_names
 
-        _aero_start, _aero_step, _aero_get_names = _aero_make_runtime()
+        _aero_start, _aero_step_n, _aero_get_names = _aero_make_runtime()
         """;
 
     public PythonScriptRuntime(Object aeroApi, Object hudApi) {
@@ -207,32 +237,44 @@ public final class PythonScriptRuntime implements AutoCloseable {
             }
         };
         this.context = Context.newBuilder("python")
+                .engine(ENGINE)
                 .out(chatOutput)
                 .allowHostAccess(HostAccess.EXPLICIT)
                 .allowHostClassLookup(name -> false)
                 .allowIO(false)
                 .allowCreateThread(false)
                 .allowNativeAccess(false)
+                .resourceLimits(ResourceLimits.newBuilder()
+                        .statementLimit(STATEMENT_LIMIT, null)
+                        .build())
                 .build();
-        context.getBindings("python").putMember("aero", aeroApi instanceof AeroScriptApi api ? api.asProxy() : aeroApi);
-        context.getBindings("python").putMember("hud", hudApi);
+        this.bindings = context.getBindings("python");
+        bindings.putMember("_aero_allowed_imports_config", String.join(",", AeroComputersConfig.ALLOWED_LIBRARIES.get()));
+        bindings.putMember("aero", aeroApi instanceof AeroScriptApi api ? api.asProxy() : aeroApi);
+        bindings.putMember("hud", hudApi);
+
         context.eval("python", BOOTSTRAP);
+        this.startFn = bindings.getMember("_aero_start");
+        this.stepFn = bindings.getMember("_aero_step_n");
     }
 
     public void start(String source) {
-        context.getBindings("python").putMember("_aero_source", source == null ? "" : source);
-        context.eval("python", "_aero_start(_aero_source)");
+        context.resetLimits();
+        startFn.execute(source == null ? "" : source);
         started = true;
         finished = false;
     }
 
     /**
-     * Executes one cooperative step. Returns false once the script has ended.
+     * Executes up to maxSteps cooperative steps in a single host->guest call,
+     * stopping early when the time budget is used up.
+     * Returns false once the script has ended.
      */
-    public boolean step() {
+    public boolean step(int maxSteps, double budgetSeconds) {
         if (!started || finished) return false;
         try {
-            finished = !context.eval("python", "_aero_step()").asBoolean();
+            context.resetLimits();
+            finished = !stepFn.execute(maxSteps, budgetSeconds).asBoolean();
             return !finished;
         } catch (RuntimeException exception) {
             finished = true;
@@ -245,11 +287,11 @@ public final class PythonScriptRuntime implements AutoCloseable {
     }
 
     public void setVariable(String name, Object value) {
-        context.getBindings("python").putMember(name, value);
+        bindings.putMember(name, value);
     }
 
     public Object getVariable(String name) {
-        Value value = context.getBindings("python").getMember(name);
+        Value value = bindings.getMember(name);
         return value == null || value.isNull() ? null : convert(value);
     }
 
