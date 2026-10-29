@@ -1,6 +1,7 @@
 package net.tui.aerocomputers.script;
 
 import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
+import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.Value;
 import org.graalvm.polyglot.proxy.ProxyExecutable;
 import org.graalvm.polyglot.proxy.ProxyObject;
@@ -18,10 +19,10 @@ public final class AeroScriptApi {
     public AeroScriptApi(BoardComputerBlockEntity computer) {
         this.computer = computer;
         Map<String, Object> members = new LinkedHashMap<>();
-        members.put("getPos", call(args -> computer.scriptGetPos()));
-        members.put("getRot", call(args -> computer.scriptGetRot()));
-        members.put("getVel", call(args -> computer.scriptGetVel()));
-        members.put("radar", call(args -> computer.scriptRadar()));
+        members.put("getPos", call(args -> computer.scriptGetPos(stringArrayArg(args, 0))));
+        members.put("getRot", call(args -> computer.scriptGetRot(stringArrayArg(args, 0))));
+        members.put("getVel", call(args -> computer.scriptGetVel(stringArrayArg(args, 0))));
+        members.put("radar", call(args -> computer.scriptRadar(stringArrayArg(args, 0))));
         members.put("send", call(args -> computer.scriptSend(stringArg(args, 0), stringArg(args, 1))));
         members.put("read", call(args -> computer.scriptRead()));
         members.put("clear", call(args -> computer.scriptClear()));
@@ -72,5 +73,26 @@ public final class AeroScriptApi {
             return list;
         }
         return value.toString();
+    }
+
+    private static String[] stringArrayArg(List<Object> args, int index) {
+        if (index >= args.size() || !(args.get(index) instanceof List<?> list)) {
+            throw new IllegalArgumentException(
+                    "Expected one argument: [\"freq_one\", \"freq_two\"]"
+            );
+        }
+
+        if (list.size() != 2 ||
+                !(list.get(0) instanceof String) ||
+                !(list.get(1) instanceof String)) {
+            throw new IllegalArgumentException(
+                    "Expected a list containing exactly two strings"
+            );
+        }
+
+        return new String[] {
+                (String) list.get(0),
+                (String) list.get(1)
+        };
     }
 }

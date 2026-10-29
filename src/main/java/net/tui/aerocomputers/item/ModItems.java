@@ -15,6 +15,11 @@ public class ModItems {
             () -> new HUDHelmetItem(ModArmorMaterials.HUD_ARMOR_MATERIAL, ArmorItem.Type.HELMET,
                     new Item.Properties().durability(ArmorItem.Type.HELMET.getDurability(-1))));
 
+    public static final DeferredItem<Item> RAW_TRANSFORMIUM = ITEMS.register("raw_transformium",
+            () -> new Item(new Item.Properties()));
+
+    public static final DeferredItem<Item> TRANSFORMIUM_INGOT = ITEMS.register("transformium_ingot",
+            () -> new Item(new Item.Properties()));
 
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);

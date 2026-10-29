@@ -60,6 +60,12 @@ public class ModNetworking {
                 WeaponLinkerEntryPayload::handle
         );
 
+        registrar.playToServer(
+                SensorEntryPayload.TYPE,
+                SensorEntryPayload.STREAM_CODEC,
+                SensorEntryPayload::handle
+        );
+
         registrar.playToClient(
                 CameraChunkPayload.TYPE,
                 CameraChunkPayload.STREAM_CODEC,

@@ -11,6 +11,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.block.custom.BoardComputerBlock;
 import net.tui.aerocomputers.block.custom.HudDisplayBlock;
+import net.tui.aerocomputers.block.custom.SensorBlock;
 import net.tui.aerocomputers.block.custom.WeaponLinkerBlock;
 import net.tui.aerocomputers.item.ModItems;
 
@@ -20,7 +21,10 @@ public class ModBlocks {
     public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(AeroComputers.MOD_ID);
 
     public static final DeferredBlock<Block> BOARDCOMPUTER = registerBlock("board_computer",
-            () -> new BoardComputerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL).noOcclusion()));
+            () -> new BoardComputerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
+
+    public static final DeferredBlock<Block> SENSORBLOCK = registerBlock("sensor",
+            () -> new SensorBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
 
     public static final DeferredBlock<Block> HUDDISPLAY = registerBlock("hud_display",
             () -> new HudDisplayBlock(BlockBehaviour.Properties.of().strength(0.2f).sound(SoundType.GLASS).noOcclusion()
@@ -30,6 +34,12 @@ public class ModBlocks {
 
     public static final DeferredBlock<Block> WEAPONLINKER = registerBlock("weapon_linker",
             () -> new WeaponLinkerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL).noOcclusion()));
+
+    public static final DeferredBlock<Block> TRANSFORMIUM = registerBlock("transformium",
+            () -> new Block(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<Block> TRANSFORMIUMORE = registerBlock("transformium_ore",
+            () -> new Block(BlockBehaviour.Properties.of().strength(2).sound(SoundType.STONE).requiresCorrectToolForDrops()));
 
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {

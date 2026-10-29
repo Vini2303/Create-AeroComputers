@@ -1,21 +1,20 @@
 package net.tui.aerocomputers.item.custom;
 
-import com.simibubi.create.foundation.utility.DistExecutor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
-import net.neoforged.api.distmarker.Dist;
-import net.tui.aerocomputers.AeroComputersClient;
 import net.tui.aerocomputers.network.HudEntryPayload;
+import net.tui.aerocomputers.screen.custom.HudMenu;
 
 import java.util.List;
 
@@ -33,11 +32,18 @@ public class HUDHelmetItem extends ArmorItem {
     ) {
         ItemStack stack = player.getItemInHand(hand);
 
-        if (level.isClientSide && player.isShiftKeyDown()) {
-            net.tui.aerocomputers.client.HUDHelmetClient.requestOpen(hand);
+        if (!level.isClientSide && player.isShiftKeyDown()) {
+            player.openMenu(
+                    new SimpleMenuProvider(
+                            (containerId, inventory, p) ->
+                                    new HudMenu(containerId, inventory, hand),
+                            Component.literal("Freq Setter")
+                    ),
+                    buf -> buf.writeEnum(hand)
+            );
         }
 
-        return InteractionResultHolder.success(stack);
+        return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
     }
 
     @Override

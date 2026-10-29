@@ -25,6 +25,10 @@ public class ModBlockEntitys {
             BLOCK_ENTITYS.register("weapon_linker_be", () -> BlockEntityType.Builder.of(
                     WeaponLinkerBlockEntity::new, ModBlocks.WEAPONLINKER.get()).build(null));
 
+    public static final Supplier<BlockEntityType<SensorBlockEntity>> SENSOR_BE =
+            BLOCK_ENTITYS.register("sensor_be", () -> BlockEntityType.Builder.of(
+                    SensorBlockEntity::new, ModBlocks.SENSORBLOCK.get()).build(null));
+
 
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITYS.register(eventBus);

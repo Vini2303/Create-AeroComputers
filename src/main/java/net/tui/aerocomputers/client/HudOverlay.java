@@ -16,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.item.ModItems;
 import net.tui.aerocomputers.network.HudEntryPayload;
+import net.tui.aerocomputers.registries.HudRegistry;
 import org.joml.Matrix4f;
 
 import java.util.List;
@@ -30,13 +31,25 @@ public class HudOverlay implements LayeredDraw.Layer {
         ItemStack helmet = player.getItemBySlot(EquipmentSlot.HEAD);
         if (!helmet.is(ModItems.HUD_HELMET.get())) return;
 
-        CustomData data = helmet.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
+        CustomData data = helmet.getOrDefault(
+                DataComponents.CUSTOM_DATA,
+                CustomData.EMPTY
+        );
+
         CompoundTag tag = data.copyTag();
-        String linkedName = tag.contains(HudEntryPayload.NBT_KEY) ? tag.getString(HudEntryPayload.NBT_KEY) : "";
 
-        List<ClientHudRegistry.DrawEntry> entries = ClientHudRegistry.get(linkedName);
+        String freqOne = tag.contains("FreqOne")
+                ? tag.getString("FreqOne")
+                : "";
 
-        for (ClientHudRegistry.DrawEntry e : entries) {
+        String freqTwo = tag.contains("FreqTwo")
+                ? tag.getString("FreqTwo")
+                : "";
+
+        List<HudRegistry.DrawEntry> entries =
+                HudRegistry.get(freqOne, freqTwo);
+
+        for (HudRegistry.DrawEntry e : entries) {
             switch (e.type()) {
                 case "label" -> renderLabel(guiGraphics, e);
                 case "line" -> renderLine(guiGraphics, e);
@@ -56,7 +69,7 @@ public class HudOverlay implements LayeredDraw.Layer {
 
     private int clamp255(int v) { return Math.max(0, Math.min(255, v)); }
 
-    private void renderLabel(GuiGraphics g, ClientHudRegistry.DrawEntry e) {
+    private void renderLabel(GuiGraphics g, HudRegistry.DrawEntry e) {
         var font = Minecraft.getInstance().font;
         g.pose().pushPose();
         g.pose().translate((float) e.x(), (float) e.y(), 0);
@@ -65,7 +78,7 @@ public class HudOverlay implements LayeredDraw.Layer {
         g.pose().popPose();
     }
 
-    private void renderRect(GuiGraphics g, ClientHudRegistry.DrawEntry e) {
+    private void renderRect(GuiGraphics g, HudRegistry.DrawEntry e) {
         int x = (int) e.x(), y = (int) e.y(), w = (int) e.w(), h = (int) e.h();
         if (e.renderCenter()) {
             g.fill(x, y, x + w, y + h, argb(e.centerColor()));
@@ -80,7 +93,7 @@ public class HudOverlay implements LayeredDraw.Layer {
         }
     }
 
-    private void renderLine(GuiGraphics g, ClientHudRegistry.DrawEntry e) {
+    private void renderLine(GuiGraphics g, HudRegistry.DrawEntry e) {
         double dx = e.x2() - e.x();
         double dy = e.y2() - e.y();
         double len = Math.sqrt(dx * dx + dy * dy);
@@ -98,14 +111,14 @@ public class HudOverlay implements LayeredDraw.Layer {
     // Polygon fill/border via GuiGraphics primitives only — no true tessellated
     // fill is attempted here; this draws the outline as connected line segments
     // and approximates a filled center using the bounding box. See note below.
-    private void renderPoly(GuiGraphics g, ClientHudRegistry.DrawEntry e) {
+    private void renderPoly(GuiGraphics g, HudRegistry.DrawEntry e) {
         List<Double> xs = e.xs();
         List<Double> ys = e.ys();
         if (xs.size() < 2 || xs.size() != ys.size()) return;
 
         for (int i = 0; i < xs.size(); i++) {
             int j = (i + 1) % xs.size();
-            var lineEntry = new ClientHudRegistry.DrawEntry(
+            var lineEntry = new HudRegistry.DrawEntry(
                     "line", xs.get(i), ys.get(i), xs.get(j), ys.get(j),
                     0, 0, "", 0, e.borderWidth(), 0, false, false,
                     e.borderColor(), List.of(), List.of(), List.of(), List.of()
@@ -114,7 +127,7 @@ public class HudOverlay implements LayeredDraw.Layer {
         }
     }
 
-    private void renderCamera(GuiGraphics g, ClientHudRegistry.DrawEntry e) {
+    private void renderCamera(GuiGraphics g, HudRegistry.DrawEntry e) {
         if (CameraFeed.rendering) return;
 
         CameraFeed.requestFixed();

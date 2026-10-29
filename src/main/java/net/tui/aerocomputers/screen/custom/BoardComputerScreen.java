@@ -136,6 +136,10 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
         addRenderableWidget(editor);
         setInitialFocus(editor);
 
+        var lvl = menu.blockEntity.getLevel();
+        editor.setFoldKey((lvl != null ? lvl.dimension().location().toString() : "?")
+                + "@" + menu.blockEntity.getBlockPos().asLong());
+
         int buttonY = topPos + 210;
 
         addRenderableWidget(Button.builder(
@@ -259,11 +263,6 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
             AeroComputers.LOGGER.error("Invalid save file!");
             return;
         }
-
-        AeroComputers.LOGGER.info("Variables: " + dataParts[0]);
-        AeroComputers.LOGGER.info("Inputs: " + dataParts[1]);
-        AeroComputers.LOGGER.info("Outputs: " + dataParts[2]);
-        AeroComputers.LOGGER.info("Name: " + dataParts[3]);
 
         // Variables
         if (!dataParts[0].isBlank()) {

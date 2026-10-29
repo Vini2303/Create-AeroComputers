@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "createaerocomputers:block/sensor"
+    },
+    "facing=south": {
+      "model": "createaerocomputers:block/sensor",
+      "y": 180
+    },
+    "facing=east": {
+      "model": "createaerocomputers:block/sensor",
+      "y": 90
+    },
+    "facing=west": {
+      "model": "createaerocomputers:block/sensor",
+      "y": 270
+    }
+  }
+}

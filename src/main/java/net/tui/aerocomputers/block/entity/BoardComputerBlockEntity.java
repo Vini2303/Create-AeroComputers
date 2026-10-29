@@ -21,12 +21,15 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.ai.sensing.Sensor;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.tui.aerocomputers.AeroComputers;
+import net.tui.aerocomputers.registries.HudRegistry;
+import net.tui.aerocomputers.registries.SensorRegistry;
 import net.tui.aerocomputers.screen.custom.BoardComputerMenu;
 import net.tui.aerocomputers.script.AeroScriptApi;
 import net.tui.aerocomputers.script.HudScriptApi;
@@ -42,50 +45,13 @@ import java.util.*;
 
 public class BoardComputerBlockEntity extends KineticBlockEntity implements MenuProvider, BlockEntitySubLevelActor {
 
-    public List<List<Double>> getAllSubLevelPositions() {
-        List<List<Double>> allPositions = new ArrayList<>();
 
-        if (this.level == null || currentSubLevel == null) {
-            return allPositions;
-        }
-
-        SubLevelContainer container =
-                ServerSubLevelContainer.getContainer(this.level);
-
-        if (container == null) {
-            return allPositions;
-        }
-
-        Vector3d currentPos = currentSubLevel.logicalPose().position();
-
-        for (SubLevel subLevel : container.getAllSubLevels()) {
-            if (subLevel != currentSubLevel) {
-                Vector3d pos = subLevel.logicalPose().position();
-
-                allPositions.add(List.of(
-                        round2(pos.x()),
-                        round2(pos.y()),
-                        round2(pos.z())
-                ));
-            }
-        }
-
-        allPositions.sort(Comparator.comparingDouble(pos -> {
-            double dx = pos.get(0) - currentPos.x();
-            double dy = pos.get(1) - currentPos.y();
-            double dz = pos.get(2) - currentPos.z();
-
-            return dx * dx + dy * dy + dz * dz;
-        }));
-
-        return allPositions;
-    }
 
 
     private static final int PYTHON_STEPS_PER_TICK = 64;
     private static final double PYTHON_BUDGET_SECONDS = 0.001; // 1 ms per tick
     /** HUD changes are pushed to clients at most every N ticks. */
-    private static final int HUD_SYNC_INTERVAL_TICKS = 3;
+    private static final int HUD_SYNC_INTERVAL_TICKS = 1;
 
     // GraalPy runtime state. Created lazily in runPythonSteps(), only while not paused.
     private @Nullable PythonScriptRuntime pythonRuntime;
@@ -131,6 +97,10 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     private static class DrawObject {
         String id;
         String type; // "label", "line", "poly", "rect", "cam"
+
+        String freqOne;
+        String freqTwo;
+
         double x, y, x2, y2, w, h;
         String text = "";
         double fontSize = 1.0;
@@ -414,32 +384,52 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     // Methods exposed through the deliberately small AeroScriptApi facade.
-    public Object scriptGetPos() {
-        Vector3d pos = new Vector3d(getBlockPos().getX() + 0.5, getBlockPos().getY() + 0.5, getBlockPos().getZ() + 0.5);
-        if (currentSubLevel != null) currentSubLevel.logicalPose().transformPosition(pos);
-        return List.of(round2(pos.x), round2(pos.y), round2(pos.z));
+    public Object scriptGetPos(@Nullable String[] freq) {
+        if (freq != null) {
+            SensorBlockEntity s = SensorRegistry.get(freq[0], freq[1]);
+            return s == null ? List.of(0.0, 0.0, 0.0) : asXyz(s.get_Pos());
+        }
+        throw new IllegalStateException("No sensor " + freq[0] + "/" + freq[1]);
     }
 
-    public Object scriptGetRot() {
-        if (currentSubLevel == null) return List.of(0.0, 0.0, 0.0);
-        Quaterniond start = new Quaterniond().rotateY(Math.toRadians(-getBlockState().getValue(DirectionalKineticBlock.FACING).toYRot()));
-        Quaterniond relative = start.invert().mul(new Quaterniond(currentSubLevel.logicalPose().orientation()));
-        Vector3d euler = new Vector3d();
-        relative.getEulerAnglesYXZ(euler);
-        return List.of(round2(Math.toDegrees(euler.x)), round2(Math.toDegrees(euler.y)), round2(Math.toDegrees(euler.z)));
+    public Object scriptGetRot(@Nullable String[] freq) {
+        if (freq != null) {
+            SensorBlockEntity s = SensorRegistry.get(freq[0], freq[1]);
+            return s == null ? List.of(0.0, 0.0, 0.0) : asXyz(s.get_Rot());
+        }
+        throw new IllegalStateException("No sensor " + freq[0] + "/" + freq[1]);
     }
 
-    public Object scriptGetVel() {
-        if (currentSubLevel == null) return List.of(0.0, 0.0, 0.0);
-        Vector3d current = new Vector3d(getBlockPos().getX() + 0.5, getBlockPos().getY() + 0.5, getBlockPos().getZ() + 0.5);
-        Vector3d previous = new Vector3d(current);
-        currentSubLevel.logicalPose().transformPosition(current);
-        currentSubLevel.lastPose().transformPosition(previous);
-        Vector3d velocity = current.sub(previous).mul(20.0);
-        return List.of(round2(velocity.x), round2(velocity.y), round2(velocity.z));
+    public Object scriptGetVel(@Nullable String[] freq) {
+        if (freq != null) {
+            SensorBlockEntity s = SensorRegistry.get(freq[0], freq[1]);
+            return s == null ? List.of(0.0, 0.0, 0.0) : asXyz(s.get_Vel());
+        }
+        throw new IllegalStateException("No sensor " + freq[0] + "/" + freq[1]);
     }
 
-    public Object scriptRadar() { return getAllSubLevelPositions(); }
+    public Object scriptRadar(@Nullable String[] freq) {
+        if (freq != null) {
+            SensorBlockEntity s = SensorRegistry.get(freq[0], freq[1]);
+            if (s == null) return List.of();
+            Object r = s.get_Radar();
+            if (r instanceof List<?> list) {
+                List<Object> out = new ArrayList<>();
+                for (Object o : list) out.add(asXyz(o));
+                return out;
+            }
+            return r;
+        }
+        throw new IllegalStateException("No sensor " + freq[0] + "/" + freq[1]);
+    }
+
+    private static Object asXyz(Object v) {
+        if (v instanceof List<?>) return v;
+        if (v instanceof Vector3d d) return List.of(round2(d.x), round2(d.y), round2(d.z));
+        if (v instanceof net.minecraft.world.phys.Vec3 d) return List.of(round2(d.x), round2(d.y), round2(d.z));
+        if (v instanceof double[] a && a.length >= 3) return List.of(round2(a[0]), round2(a[1]), round2(a[2]));
+        return v;
+    }
 
     public Object scriptCommand(String name, List<Object> args) {
         switch (name) {
@@ -476,8 +466,28 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     public String scriptCreateHudObject(String type, List<Object> args) {
+        if (args.isEmpty() || !(args.get(0) instanceof List<?> freq)
+                || freq.size() != 2
+                || !(freq.get(0) instanceof String)
+                || !(freq.get(1) instanceof String)) {
+            throw new IllegalArgumentException(
+                    type + " expects [freq_one, freq_two] as its first argument"
+            );
+        }
+
+        String freqOne = (String) freq.get(0);
+        String freqTwo = (String) freq.get(1);
+
+        if (freqOne.isBlank() || freqTwo.isBlank()) {
+            throw new IllegalArgumentException("HUD frequencies cannot be blank");
+        }
+
+        args = args.subList(1, args.size());
+
         DrawObject obj = new DrawObject();
         obj.id = "d" + (drawObjectIdCounter++);
+        obj.freqOne = freqOne;
+        obj.freqTwo = freqTwo;
         switch (type) {
             case "hud.Label" -> { obj.type = "label"; obj.x = argNumber(args, 0, 0); obj.y = argNumber(args, 1, 0); obj.text = arg(args, 2) == null ? "" : arg(args, 2).toString(); obj.color = toColorList(arg(args, 3)); obj.fontSize = argNumber(args, 4, 1); }
             case "hud.Line" -> { obj.type = "line"; obj.x = argNumber(args, 0, 0); obj.y = argNumber(args, 1, 0); obj.x2 = argNumber(args, 2, 0); obj.y2 = argNumber(args, 3, 0); obj.width = argNumber(args, 4, 1); obj.color = toColorList(arg(args, 5)); }
@@ -591,7 +601,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         return 0;
     }
 
-    private static double round2(double value) {
+    static double round2(double value) {
         return Math.round(value * 100.0) / 100.0;
     }
 
@@ -674,7 +684,31 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
     private static String asText(Object value) { return value == null ? "None" : value.toString(); }
     private List<Integer> toColorList(Object value) {
-        List<Integer> out = new ArrayList<>(); if (value instanceof List<?> list) for (Object v : list) out.add((int) asDouble(v)); while (out.size() < 3) out.add(255); return out;
+        List<Integer> out = new ArrayList<>();
+
+        if (value instanceof List<?> list) {
+            for (Object v : list) out.add((int) asDouble(v));
+
+        } else if (value instanceof Number n) {                 // 0xFF8800
+            int rgb = (int) n.longValue();
+            out.add((rgb >> 16) & 0xFF);
+            out.add((rgb >> 8) & 0xFF);
+            out.add(rgb & 0xFF);
+
+        } else if (value instanceof String s) {                 // "#FF8800" or "0xFF8800"
+            String h = s.trim();
+            if (h.startsWith("#")) h = h.substring(1);
+            else if (h.regionMatches(true, 0, "0x", 0, 2)) h = h.substring(2);
+            try {
+                int rgb = Integer.parseInt(h, 16);
+                out.add((rgb >> 16) & 0xFF);
+                out.add((rgb >> 8) & 0xFF);
+                out.add(rgb & 0xFF);
+            } catch (NumberFormatException ignored) { }
+        }
+
+        while (out.size() < 3) out.add(255);
+        return out;
     }
     private List<Double> toPosList(Object value) {
         List<Double> out = new ArrayList<>(); if (value instanceof List<?> list) for (Object v : list) out.add(asDouble(v)); while (out.size() < 3) out.add(0.0); return out;
@@ -1050,33 +1084,44 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     private void updateClientHud() {
-        if (level == null || !level.isClientSide)
+        if (level == null || !level.isClientSide) {
             return;
+        }
 
-        var entries = drawObjects.stream()
-                .map(o -> new net.tui.aerocomputers.client.ClientHudRegistry.DrawEntry(
-                        o.type,
-                        o.x, o.y,
-                        o.x2, o.y2,
-                        o.w, o.h,
-                        o.text,
-                        o.fontSize,
-                        o.width,
-                        o.borderWidth,
-                        o.renderCenter,
-                        o.renderBorder,
-                        o.color,
-                        o.centerColor,
-                        o.borderColor,
-                        o.xs,
-                        o.ys
-                ))
-                .toList();
+        Map<HudRegistry.FreqPair, List<HudRegistry.DrawEntry>> grouped =
+                new HashMap<>();
 
-        net.tui.aerocomputers.client.ClientHudRegistry.update(
-                getComputerName(),
-                entries
-        );
+        for (DrawObject o : drawObjects) {
+            if (o.freqOne == null || o.freqOne.isBlank()
+                    || o.freqTwo == null || o.freqTwo.isBlank()) {
+                continue;
+            }
+
+            var entry = new HudRegistry.DrawEntry(
+                    o.type,
+                    o.x, o.y,
+                    o.x2, o.y2,
+                    o.w, o.h,
+                    o.text,
+                    o.fontSize,
+                    o.width,
+                    o.borderWidth,
+                    o.renderCenter,
+                    o.renderBorder,
+                    List.copyOf(o.color),
+                    List.copyOf(o.centerColor),
+                    List.copyOf(o.borderColor),
+                    List.copyOf(o.xs),
+                    List.copyOf(o.ys)
+            );
+
+            var key = new HudRegistry.FreqPair(o.freqOne, o.freqTwo);
+
+            grouped.computeIfAbsent(key, ignored -> new ArrayList<>())
+                    .add(entry);
+        }
+
+        HudRegistry.replaceAll(grouped);
     }
 
     private int variableUpdateId = 0;
@@ -1114,6 +1159,8 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             ct.putIntArray("color", o.color.stream().mapToInt(Integer::intValue).toArray());
             ct.putIntArray("centerColor", o.centerColor.stream().mapToInt(Integer::intValue).toArray());
             ct.putIntArray("borderColor", o.borderColor.stream().mapToInt(Integer::intValue).toArray());
+            ct.putString("freqOne", o.freqOne == null ? "" : o.freqOne);
+            ct.putString("freqTwo", o.freqTwo == null ? "" : o.freqTwo);
 
             ListTag xsTag = new ListTag();
             for (double v : o.xs) xsTag.add(net.minecraft.nbt.DoubleTag.valueOf(v));
@@ -1150,6 +1197,9 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             o.h = ct.getDouble("h");
             o.renderCenter = ct.getBoolean("renderCenter");
             o.renderBorder = ct.getBoolean("renderBorder");
+
+            o.freqOne = ct.getString("freqOne");
+            o.freqTwo = ct.getString("freqTwo");
 
             o.color = Arrays.stream(ct.getIntArray("color")).boxed().toList();
             o.centerColor = Arrays.stream(ct.getIntArray("centerColor")).boxed().toList();

@@ -7,6 +7,7 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
 import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
+import net.tui.aerocomputers.config.AeroComputersConfig;
 import net.tui.aerocomputers.lang.LanguageSpec;
 import net.tui.aerocomputers.lang.ProgramAnalyzer;
 import net.tui.aerocomputers.lang.ProgramInfo;
@@ -153,6 +154,64 @@ public class CodeEditorWidget extends AbstractWidget {
     private final Map<String, Set<String>> classMethodNames = new HashMap<>();
     private final Map<String, Set<String>> classFields = new HashMap<>();
     private String[] lineClass = new String[0];                             // class a line belongs to
+
+    // libraries the server config allows (what "import x" may use)
+    private Set<String> enabledLibs = new TreeSet<>();
+
+    // function scopes: parameters and locals are only visible inside their function
+    private static final class Scope {
+        final int start;
+        final int indent;
+        final int parent;
+        final List<String> params;
+        final Set<String> locals = new LinkedHashSet<>();
+        int end;
+
+        Scope(int start, int indent, int parent, List<String> params) {
+            this.start = start;
+            this.indent = indent;
+            this.parent = parent;
+            this.params = params;
+            this.end = start;
+        }
+    }
+    private final List<Scope> scopes = new ArrayList<>();
+    private int[] lineScope = new int[0];
+    private final Set<String> globalNames = new LinkedHashSet<>();
+
+    // colour literals (0xFF0000 and "#FF0000") + the colour picker popup
+    private record ColorLit(int line, int start, int end, int rgb) {}
+    private List<List<ColorLit>> colorsByLine = new ArrayList<>();
+    private int maxColorsPerLine = 0;
+
+    private static final int PK_SV_W = 90;
+    private static final int PK_SV_H = 80;
+    private static final int PK_HUE_W = 10;
+    private static final int PK_W = 118;
+    private static final int PK_H = 110;
+
+    private boolean pickerOpen = false;
+    private int pickerDrag = 0;                 // 0 none, 1 saturation/value, 2 hue
+    private int pickerLine, pickerStart, pickerEnd;
+    private boolean pickerString, pickerLower, pickerUndoDone;
+    private char pickerQuote;
+    private String pickerPrefix = "0x";
+    private float pickerH, pickerS, pickerV;
+
+    private static final int SWATCH_W = 10;     // colour square (9px) + 1px gap, drawn inline before the literal
+    private static final int FOLD_ZONE = 12;    // gutter space for the fold arrows
+    private ColorLit hoverSwatch;
+
+    // code folding (indentation based, like VS Code for Python)
+    // collapsed regions survive closing and re-opening the GUI (the widget itself is recreated every time)
+    private record FoldMemory(int textHash, Set<Integer> folds) {}
+    private static final Map<String, FoldMemory> FOLD_MEMORY = new HashMap<>();
+    private String foldKey;
+
+    private final Set<Integer> folded = new TreeSet<>();   // start lines of collapsed regions
+    private int[] foldEnd = new int[0];                    // per line: last line of the region it opens, or -1
+    private int[] rowOf = new int[0];                      // document line -> visual row
+    private int[] lineOfRow = new int[0];                  // visual row -> document line
     private List<String> extraVariables = List.of();
     private List<String> variables = List.of();
     private List<String> functions = List.of();
@@ -202,6 +261,7 @@ public class CodeEditorWidget extends AbstractWidget {
     public void setText(String text) {
         lines.clear();
         lines.addAll(List.of(text.split("\n", -1)));
+        folded.clear();
         undoStack.clear();
         redoStack.clear();
         lastEditKind = KIND_NONE;
@@ -216,7 +276,10 @@ public class CodeEditorWidget extends AbstractWidget {
     @Override
     public void setFocused(boolean focused) {
         super.setFocused(focused);
-        if (focused) resetBlink(); else closeAutocomplete();
+        // NOTE: do NOT close popups here. The screen calls setFocused(false) immediately followed by
+        // setFocused(true) on every click, which used to close the colour picker right after opening it.
+        // Real focus loss is detected in renderWidget().
+        if (focused) resetBlink();
     }
 
     @Override
@@ -226,22 +289,42 @@ public class CodeEditorWidget extends AbstractWidget {
     // GEOMETRY
     // =====================================================================
     private Font font() { return Minecraft.getInstance().font; }
-    private int gutter() { return Math.max(34, font().width(String.valueOf(lines.size())) + 22); }
+    private int gutter() { return Math.max(34, font().width(String.valueOf(lines.size())) + 22) + FOLD_ZONE; }
     private int textLeft() { return getX() + gutter(); }
     private int textOrigin() { return textLeft() + 6 - scrollX; }
-    private int lineTop(int line) { return getY() + 5 + line * LH - scrollY; }
+    private int rowIndex(int line) { return line >= 0 && line < rowOf.length ? rowOf[line] : Math.max(0, line); }
+    private int rowCount() { return Math.max(1, lineOfRow.length); }
+    private int lineAtRow(int row) { return lineOfRow.length == 0 ? 0 : lineOfRow[clamp(row, 0, lineOfRow.length - 1)]; }
+    private boolean isHidden(int line) { return line >= 0 && line < rowOf.length && lineOfRow[rowOf[line]] != line; }
+    private int lineTop(int line) { return getY() + 5 + rowIndex(line) * LH - scrollY; }
     private int viewW() { return width - gutter() - SB; }
     private int viewH() { return height - SB; }
 
     private int xOf(int line, int col) {
         String s = lines.get(line);
-        return textOrigin() + font().width(s.substring(0, Math.min(col, s.length())));
+        int c = Math.min(col, s.length());
+        return textOrigin() + font().width(s.substring(0, c)) + SWATCH_W * swatchesBefore(line, c);
+    }
+
+    /** Number of colour squares drawn to the left of the boundary at "col". */
+    private int swatchesBefore(int line, int col) {
+        if (line < 0 || line >= colorsByLine.size()) return 0;
+        int n = 0;
+        for (ColorLit c : colorsByLine.get(line)) if (c.start() < col) n++;
+        return n;
+    }
+
+    /** True if a colour square is drawn directly before the character at "col". */
+    private boolean hasSwatchAt(int line, int col) {
+        if (line < 0 || line >= colorsByLine.size()) return false;
+        for (ColorLit c : colorsByLine.get(line)) if (c.start() == col) return true;
+        return false;
     }
 
     private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
 
     private int maxScrollY() {
-        int content = 5 + lines.size() * LH;
+        int content = 5 + rowCount() * LH;
         int vh = viewH();
         return content <= vh ? 0 : content - vh + LH * 3;
     }
@@ -254,16 +337,16 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     private void ensureCursorVisible() {
-        Font f = font();
+        revealLine(cursorLine);
         String line = lines.get(cursorLine);
         cursorColumn = Math.min(cursorColumn, line.length());
 
-        int cx = f.width(line.substring(0, cursorColumn));
+        int cx = xOf(cursorLine, cursorColumn) - textOrigin();
         int area = viewW() - 14;
         if (cx < scrollX) scrollX = Math.max(0, cx - 20);
         if (cx > scrollX + area) scrollX = cx - area;
 
-        int top = 5 + cursorLine * LH;
+        int top = 5 + rowIndex(cursorLine) * LH;
         int bottom = top + LH;
         int vh = viewH();
         if (top - 2 < scrollY) scrollY = top - 2;
@@ -294,9 +377,27 @@ public class CodeEditorWidget extends AbstractWidget {
         return s.substring(0, i);
     }
 
+    private void refreshEnabledLibraries() {
+        Set<String> set = new TreeSet<>();
+        try {
+            for (Object o : AeroComputersConfig.ALLOWED_LIBRARIES.get()) {
+                String name = String.valueOf(o).trim();
+                if (!name.isEmpty()) set.add(name);
+            }
+        } catch (RuntimeException e) {
+            set.add("math"); // config not loaded yet
+        }
+        enabledLibs = set;
+    }
+
+    private boolean isModuleName(String w) {
+        return LanguageSpec.MODULES.contains(w) || enabledLibs.contains(w);
+    }
+
     private void rescan() {
         int n = lines.size();
         Font f = font();
+        refreshEnabledLibraries();
 
         lineTokens = new ArrayList<>(n);
         lineStart = new PyLexer.State[n];
@@ -309,6 +410,10 @@ public class CodeEditorWidget extends AbstractWidget {
             lineTokens.add(r.tokens());
             st = r.endState();
             maxW = Math.max(maxW, f.width(lines.get(i)));
+        }
+        scanColors();
+        for (int i = 0; i < n; i++) {
+            maxW = Math.max(maxW, f.width(lines.get(i)) + SWATCH_W * colorsByLine.get(i).size());
         }
         contentWidth = maxW + 30;
 
@@ -351,6 +456,7 @@ public class CodeEditorWidget extends AbstractWidget {
         for (long[] o : stack) bracketDepth.put(o[0], -1);
 
         analyzeClasses();
+        analyzeScopes();
         analyzeImports();
 
         Set<String> vars = new LinkedHashSet<>(extraVariables);
@@ -359,6 +465,187 @@ public class CodeEditorWidget extends AbstractWidget {
         functions = List.copyOf(info.functions().keySet());
         classes = List.copyOf(info.classes().keySet());
         callableParams = info.callableParams();
+
+        computeFolds();
+    }
+
+    // ---------------------------------------------------------------- code folding
+    /** A line opens a foldable region when the following code is indented deeper. */
+    private void computeFolds() {
+        int n = lines.size();
+        foldEnd = new int[n];
+        Arrays.fill(foldEnd, -1);
+
+        Deque<Integer> stack = new ArrayDeque<>();
+        int lastCode = -1;
+
+        for (int i = 0; i < n; i++) {
+            if (lineStart[i] != PyLexer.State.NONE) { lastCode = i; continue; } // inside a multi-line string
+            if (PyLexer.significant(lineTokens.get(i)).isEmpty()) continue;     // blank / comment only
+
+            int d = indentOf(lines.get(i));
+            while (!stack.isEmpty() && indentOf(lines.get(stack.peek())) >= d) {
+                int start = stack.pop();
+                if (lastCode > start) foldEnd[start] = lastCode;
+            }
+            stack.push(i);
+            lastCode = i;
+        }
+        while (!stack.isEmpty()) {
+            int start = stack.pop();
+            if (lastCode > start) foldEnd[start] = lastCode;
+        }
+
+        folded.removeIf(start -> start < 0 || start >= n || foldEnd[start] <= start);
+        layoutRows();
+    }
+
+    private void layoutRows() {
+        int n = lines.size();
+        rowOf = new int[n];
+        int[] tmp = new int[n];
+        int rows = 0;
+        int hiddenUntil = -1;
+
+        for (int i = 0; i < n; i++) {
+            if (i <= hiddenUntil) { rowOf[i] = Math.max(0, rows - 1); continue; }
+            rowOf[i] = rows;
+            tmp[rows++] = i;
+            if (folded.contains(i) && i < foldEnd.length && foldEnd[i] > i) hiddenUntil = foldEnd[i];
+        }
+        lineOfRow = Arrays.copyOf(tmp, rows);
+        persistFolds();
+    }
+
+    /** Opens every collapsed region that hides this line (the cursor must never be hidden). */
+    private void revealLine(int line) {
+        boolean changed = false;
+        for (Iterator<Integer> it = folded.iterator(); it.hasNext(); ) {
+            int start = it.next();
+            if (start < foldEnd.length && start < line && line <= foldEnd[start]) { it.remove(); changed = true; }
+        }
+        if (changed) layoutRows();
+    }
+
+    /**
+     * Keeps collapsed regions across a bulk change (undo, redo, move, duplicate, delete).
+     * A region stays collapsed unless the change touches the code inside it or moves its header.
+     */
+    private void remapFolds(List<String> oldLines, int[] oldFoldEnd) {
+        if (folded.isEmpty()) return;
+
+        int oldN = oldLines.size();
+        int newN = lines.size();
+        int max = Math.min(oldN, newN);
+
+        int p = 0;                                   // first differing line
+        while (p < max && oldLines.get(p).equals(lines.get(p))) p++;
+        int q = 0;                                   // common lines at the end
+        while (q < max - p && oldLines.get(oldN - 1 - q).equals(lines.get(newN - 1 - q))) q++;
+
+        int changedEnd = oldN - q;                   // old lines [p, changedEnd) were changed
+        int delta = newN - oldN;
+
+        Set<Integer> next = new TreeSet<>();
+        for (int start : folded) {
+            int end = start < oldFoldEnd.length ? oldFoldEnd[start] : start;
+
+            if (start >= changedEnd) next.add(start + delta);                       // after the change
+            else if (start < p) { if (p > end) next.add(start); }                   // before it, hidden code untouched
+            else if (start == p && changedEnd == start + 1 && delta == 0) next.add(start); // only the header text changed
+            // otherwise: hidden code touched or header moved -> the region opens
+        }
+        folded.clear();
+        folded.addAll(next);
+    }
+
+    private void shiftFolds(int sl, int el, int delta) {
+        if (folded.isEmpty()) return;
+        Set<Integer> next = new TreeSet<>();
+        for (int start : folded) {
+            if (start <= sl) next.add(start);
+            else if (start > el) next.add(start + delta);   // starts inside the replaced range are dropped
+        }
+        folded.clear();
+        folded.addAll(next);
+    }
+
+    /** Call once after creating the editor: restores the collapsed regions of this computer. */
+    public void setFoldKey(String key) {
+        this.foldKey = key;
+        FoldMemory m = FOLD_MEMORY.get(key);
+        if (m != null && m.textHash() == getText().hashCode()) {   // only if the program is still the same
+            folded.clear();
+            folded.addAll(m.folds());
+            computeFolds();                                         // validates and lays out the rows
+        }
+    }
+
+    private void persistFolds() {
+        if (foldKey == null) return;
+        if (folded.isEmpty()) FOLD_MEMORY.remove(foldKey);
+        else FOLD_MEMORY.put(foldKey, new FoldMemory(getText().hashCode(), new TreeSet<>(folded)));
+    }
+
+    private boolean isFoldable(int line) { return line >= 0 && line < foldEnd.length && foldEnd[line] > line; }
+
+    private void toggleFold(int line) {
+        if (!isFoldable(line)) return;
+
+        if (folded.contains(line)) {
+            folded.remove(line);
+        } else {
+            folded.add(line);
+            // keep the cursor / selection visible: move them to the header line
+            if (cursorLine > line && cursorLine <= foldEnd[line]) {
+                cursorLine = line;
+                cursorColumn = Math.min(cursorColumn, lines.get(line).length());
+            }
+            if (selLine > line && selLine <= foldEnd[line]) {
+                selLine = line;
+                selColumn = Math.min(selColumn, lines.get(line).length());
+            }
+        }
+        closeAutocomplete();
+        layoutRows();
+        clampScroll();
+        resetBlink();
+    }
+
+    /** Ctrl+Shift+[ folds the innermost region around the cursor, Ctrl+Shift+] unfolds it. */
+    private void foldAtCursor(boolean fold) {
+        for (int s = cursorLine; s >= 0; s--) {
+            if (!isFoldable(s) || foldEnd[s] < cursorLine) continue;
+            if (fold && !folded.contains(s)) { toggleFold(s); return; }
+            if (!fold && folded.contains(s)) { toggleFold(s); return; }
+        }
+    }
+
+    private int foldArrowAt(double mx, double my) {
+        int x0 = getX();
+        int gut = gutter();
+        if (mx < x0 + gut - FOLD_ZONE || mx >= x0 + gut) return -1;
+        if (my < getY() || my >= getY() + viewH()) return -1;
+
+        int row = Math.floorDiv((int) my - getY() - 5 + scrollY, LH);
+        if (row < 0 || row >= lineOfRow.length) return -1;
+        int line = lineOfRow[row];
+        return isFoldable(line) ? line : -1;
+    }
+
+    private int[] foldedMarkerRect(Font f, int line) {
+        int x = xOf(line, lines.get(line).length()) + 6;
+        return new int[]{x, lineTop(line) - 1, f.width("...") + 8, LH};
+    }
+
+    private int foldedMarkerAt(double mx, double my) {
+        if (mx < textLeft() || mx >= getX() + width - SB || my < getY() || my >= getY() + viewH()) return -1;
+        int row = Math.floorDiv((int) my - getY() - 5 + scrollY, LH);
+        if (row < 0 || row >= lineOfRow.length) return -1;
+        int line = lineOfRow[row];
+        if (!folded.contains(line) || !isFoldable(line)) return -1;
+        int[] r = foldedMarkerRect(font(), line);
+        return (mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3]) ? line : -1;
     }
 
     private static boolean matches(char open, char close) {
@@ -388,14 +675,14 @@ public class CodeEditorWidget extends AbstractWidget {
                         alias = t.get(m + 1).text();
                         m += 2;
                     }
-                    if (LanguageSpec.IMPORTABLE_MODULES.contains(mod)) moduleAliases.put(alias, mod);
+                    if (enabledLibs.contains(mod)) moduleAliases.put(alias, mod);
                     k = m;
                     while (k < t.size() && !t.get(k).is(",")) k++;
                     k++;
                 }
             } else if (first.equals("from") && t.size() >= 4 && t.get(2).is("import")) {
                 String mod = t.get(1).text();
-                if (!LanguageSpec.IMPORTABLE_MODULES.contains(mod)) continue;
+                if (!enabledLibs.contains(mod)) continue;
                 for (int k = 3; k < t.size(); k++) {
                     Token tk = t.get(k);
                     if (tk.type() != Type.IDENT) continue;
@@ -411,7 +698,7 @@ public class CodeEditorWidget extends AbstractWidget {
                     && t.get(2).type() == Type.IDENT && t.get(3).is(".")
                     && t.get(4).type() == Type.IDENT && t.get(5).is("(")) {
                 String mod = resolveModule(t.get(2).text());
-                if (mod != null) {
+                if (mod != null && LanguageSpec.PRELOADED_MODULES.contains(mod)) {
                     String qualified = mod + "." + t.get(4).text();
                     if (LanguageSpec.NATIVE_CLASSES.containsKey(qualified)) {
                         variableClasses.put(t.get(0).text(), qualified);
@@ -484,7 +771,9 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     /** Parameter names (without self) of a def; "from" is the index right after the '('. */
-    private static List<String> paramNames(List<Token> t, int from) {
+    private static List<String> paramNames(List<Token> t, int from) { return paramNames(t, from, false); }
+
+    private static List<String> paramNames(List<Token> t, int from, boolean includeSelf) {
         List<String> out = new ArrayList<>();
         int depth = 0;
         for (int i = from; i < t.size(); i++) {
@@ -497,12 +786,69 @@ public class CodeEditorWidget extends AbstractWidget {
             }
             if (depth == 0 && x.type() == Type.IDENT && i > 0) {
                 Token p = t.get(i - 1);
-                if ((p.is("(") || p.is(",") || p.is("*") || p.is("**")) && !x.text().equals("self")) {
+                if ((p.is("(") || p.is(",") || p.is("*") || p.is("**")) && (includeSelf || !x.text().equals("self"))) {
                     out.add(x.text());
                 }
             }
         }
         return out;
+    }
+
+    /** Finds every def with its extent (by indentation) and the names bound inside it. */
+    private void analyzeScopes() {
+        scopes.clear();
+        globalNames.clear();
+
+        int n = lines.size();
+        lineScope = new int[n];
+        Arrays.fill(lineScope, -1);
+        Deque<Integer> open = new ArrayDeque<>();
+
+        for (int i = 0; i < n; i++) {
+            if (lineStart[i] != PyLexer.State.NONE) {
+                lineScope[i] = open.isEmpty() ? -1 : open.peek();
+                continue;
+            }
+
+            List<Token> t = PyLexer.significant(lineTokens.get(i));
+            if (t.isEmpty()) {
+                lineScope[i] = open.isEmpty() ? -1 : open.peek();
+                continue;
+            }
+
+            int ind = indentOf(lines.get(i));
+            while (!open.isEmpty() && ind <= scopes.get(open.peek()).indent) open.pop();
+
+            lineScope[i] = open.isEmpty() ? -1 : open.peek();
+            for (int idx : open) scopes.get(idx).end = i;
+
+            if (t.get(0).is("def") && t.size() > 2 && t.get(1).type() == Type.IDENT && t.get(2).is("(")) {
+                scopes.add(new Scope(i, ind, lineScope[i], paramNames(t, 3, true)));
+                open.push(scopes.size() - 1);
+                continue;
+            }
+
+            Set<String> assigned = new LinkedHashSet<>();
+            ProgramAnalyzer.lineVariables(t, assigned);
+
+            if (lineScope[i] >= 0) scopes.get(lineScope[i]).locals.addAll(assigned);
+            else if (lineClass[i] == null) globalNames.addAll(assigned); // class level attributes are not globals
+        }
+    }
+
+    /** Variables visible at a line: own function (params + locals), enclosing functions, globals. */
+    private List<String> visibleVariables(int line) {
+        Set<String> out = new LinkedHashSet<>();
+        int idx = line >= 0 && line < lineScope.length ? lineScope[line] : -1;
+        while (idx >= 0) {
+            Scope s = scopes.get(idx);
+            out.addAll(s.params);
+            out.addAll(s.locals);
+            idx = s.parent;
+        }
+        out.addAll(globalNames);
+        out.addAll(extraVariables);
+        return new ArrayList<>(out);
     }
 
     private String resolveModule(String name) {
@@ -523,12 +869,18 @@ public class CodeEditorWidget extends AbstractWidget {
         int vh = viewH();
         boolean active = isFocused() && !readOnly;
 
+        if (!isFocused() && (autocompleteOpen || pickerOpen)) closeAutocomplete();   // really lost focus
+
         hoveredHelpWord = hasControlDown() ? getHelpWordAt(mouseX, mouseY) : null;
 
         g.fill(x0, y0, x0 + width, y0 + height, C_BG);
 
+        // first / last are VISUAL ROWS (collapsed regions take no rows)
         int first = Math.max(0, Math.floorDiv(scrollY - 5, LH));
-        int last = Math.min(lines.size() - 1, Math.floorDiv(scrollY + vh - 5, LH));
+        int last = Math.min(lineOfRow.length - 1, Math.floorDiv(scrollY + vh - 5, LH));
+
+        hoverSwatch = swatchAt(mouseX, mouseY);
+        boolean gutterHover = mouseX >= x0 && mouseX < x0 + gut && mouseY >= y0 && mouseY < y0 + vh;
 
         // ---- current line border ----
         g.enableScissor(x0, y0, x0 + width - SB, y0 + vh);
@@ -541,10 +893,19 @@ public class CodeEditorWidget extends AbstractWidget {
 
         // ---- gutter ----
         g.enableScissor(x0, y0, x0 + gut, y0 + vh);
-        for (int i = first; i <= last; i++) {
+        for (int r = first; r <= last; r++) {
+            int i = lineAtRow(r);
             String num = String.valueOf(i + 1);
             int color = (i == cursorLine && !readOnly) ? C_GUTTER_NUM_ACTIVE : C_GUTTER_NUM;
-            g.drawString(f, num, x0 + gut - 10 - f.width(num), lineTop(i), color, false);
+            g.drawString(f, num, x0 + gut - FOLD_ZONE - 10 - f.width(num), lineTop(i), color, false);
+
+            // fold arrows: shown while the mouse is over the gutter, collapsed ones always
+            if (!readOnly && isFoldable(i)) {
+                boolean isFolded = folded.contains(i);
+                if (gutterHover || isFolded) {
+                    drawFoldArrow(g, x0 + gut - FOLD_ZONE + 6, lineTop(i) + 3, isFolded);
+                }
+            }
         }
         g.disableScissor();
 
@@ -561,8 +922,10 @@ public class CodeEditorWidget extends AbstractWidget {
         g.pose().translate(0, 0, 50);
         int clipL = x0 + gut;
         int clipR = x0 + width - SB;
-        for (int i = first; i <= last; i++) {
+        for (int r = first; r <= last; r++) {
+            int i = lineAtRow(r);
             drawLine(g, f, i, textOrigin(), lineTop(i), clipL, clipR);
+            if (folded.contains(i) && isFoldable(i)) drawFoldedMarker(g, f, i);
         }
         g.pose().popPose();
 
@@ -584,7 +947,8 @@ public class CodeEditorWidget extends AbstractWidget {
         g.pose().pushPose();
         g.pose().translate(0, 0, 400);
         if (active) {
-            if (autocompleteOpen && !suggestions.isEmpty()) drawAutocomplete(g, f, mouseX, mouseY);
+            if (pickerOpen) drawPicker(g, f);
+            else if (autocompleteOpen && !suggestions.isEmpty()) drawAutocomplete(g, f, mouseX, mouseY);
             else drawSignatureHelp(g, f);
         }
         g.pose().popPose();
@@ -595,12 +959,14 @@ public class CodeEditorWidget extends AbstractWidget {
         int[] s = normalizedSelection();
         int color = isFocused() ? C_SEL : C_SEL_INACTIVE;
 
-        for (int i = Math.max(first, s[0]); i <= Math.min(last, s[2]); i++) {
+        for (int r = first; r <= last; r++) {
+            int i = lineAtRow(r);
+            if (i < s[0] || i > s[2]) continue;
             String text = lines.get(i);
             int from = i == s[0] ? s[1] : 0;
             int to = i == s[2] ? s[3] : text.length();
-            int x1 = textOrigin() + f.width(text.substring(0, Math.min(from, text.length())));
-            int x2 = textOrigin() + f.width(text.substring(0, Math.min(to, text.length())));
+            int x1 = xOf(i, from);
+            int x2 = xOf(i, to);
             if (i < s[2]) x2 += 4; // selected line break
             int y = lineTop(i);
             g.fill(x1, y - 1, x2, y + LH, color);
@@ -629,7 +995,8 @@ public class CodeEditorWidget extends AbstractWidget {
             }
         }
 
-        for (int i = first; i <= last; i++) {
+        for (int r = first; r <= last; r++) {
+            int i = lineAtRow(r);
             int levels = lineIndent[i] / TAB;
             int y = lineTop(i);
             for (int k = 0; k < levels; k++) {
@@ -642,10 +1009,20 @@ public class CodeEditorWidget extends AbstractWidget {
 
     private void drawLine(GuiGraphics g, Font f, int lineIdx, int x, int y, int clipL, int clipR) {
         List<Token> toks = lineTokens.get(lineIdx);
+        List<ColorLit> colors = lineIdx < colorsByLine.size() ? colorsByLine.get(lineIdx) : List.of();
 
         for (int ti = 0; ti < toks.size(); ti++) {
             Token t = toks.get(ti);
             int w = f.width(t.text());
+
+            // colour square directly in front of a colour literal
+            for (ColorLit c : colors) {
+                if (c.start() == t.start()) {
+                    if (x + SWATCH_W > clipL && x < clipR) drawSwatch(g, x, y, c);
+                    x += SWATCH_W;
+                    break;
+                }
+            }
 
             if (t.type() != Type.WHITESPACE && x + w > clipL && x < clipR) {
                 g.drawString(f, t.text(), x, y, colorFor(toks, ti, lineIdx), false);
@@ -670,13 +1047,41 @@ public class CodeEditorWidget extends AbstractWidget {
         for (long kk : new long[]{k, bracketPair.get(k)}) {
             int line = (int) (kk >> 20);
             int col = (int) (kk & 0xFFFFF);
-            if (line < 0 || line >= lines.size() || col >= lines.get(line).length()) continue;
+            if (line < 0 || line >= lines.size() || col >= lines.get(line).length() || isHidden(line)) continue;
             int x = xOf(line, col);
             int w = f.width(String.valueOf(lines.get(line).charAt(col)));
             int y = lineTop(line);
             g.fill(x, y - 1, x + w, y + LH, C_BRACKET_MATCH_FILL);
             g.renderOutline(x, y - 1, w, LH + 1, C_BRACKET_MATCH_BORDER);
         }
+    }
+
+    private void drawSwatch(GuiGraphics g, int x, int y, ColorLit c) {
+        boolean active = (pickerOpen && pickerLine == c.line() && pickerStart == c.start()) || c.equals(hoverSwatch);
+        g.fill(x, y, x + 9, y + 9, active ? 0xFFFFFFFF : 0xFF6B6B6B);
+        g.fill(x + 1, y + 1, x + 8, y + 8, 0xFF000000 | c.rgb());
+    }
+
+    private void drawFoldArrow(GuiGraphics g, int cx, int cy, boolean collapsed) {
+        int c = 0xFFC5C5C5;
+        if (!collapsed) {          // v
+            g.fill(cx - 3, cy - 1, cx + 4, cy, c);
+            g.fill(cx - 2, cy, cx + 3, cy + 1, c);
+            g.fill(cx - 1, cy + 1, cx + 2, cy + 2, c);
+            g.fill(cx, cy + 2, cx + 1, cy + 3, c);
+        } else {                   // >
+            g.fill(cx - 1, cy - 3, cx, cy + 4, c);
+            g.fill(cx, cy - 2, cx + 1, cy + 3, c);
+            g.fill(cx + 1, cy - 1, cx + 2, cy + 2, c);
+            g.fill(cx + 2, cy, cx + 3, cy + 1, c);
+        }
+    }
+
+    /** the "..." box behind a collapsed line */
+    private void drawFoldedMarker(GuiGraphics g, Font f, int line) {
+        int[] r = foldedMarkerRect(f, line);
+        g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0x66264F78);
+        g.drawString(f, "...", r[0] + 4, r[1] + 1, 0xFF9DA5B4, false);
     }
 
     private void drawScrollbars(GuiGraphics g, int mx, int my) {
@@ -768,7 +1173,7 @@ public class CodeEditorWidget extends AbstractWidget {
         if (p.equals("def")) return C_FUNCTION;
         if (p.equals("class")) return C_CLASS;
 
-        if ((p.equals("import") || p.equals("from")) && LanguageSpec.MODULES.contains(w)) return C_CLASS;
+        if ((p.equals("import") || p.equals("from")) && isModuleName(w)) return C_CLASS;
 
         // member access:  math.sqrt   hud.Label   label.text
         if (p.equals(".")) {
@@ -900,10 +1305,15 @@ public class CodeEditorWidget extends AbstractWidget {
 
     private void moveVertical(int delta, boolean extend) {
         int desired = desiredColumn >= 0 ? desiredColumn : cursorColumn;
-        int target = cursorLine + delta;
-        if (target < 0) setCursor(0, 0, extend);
-        else if (target >= lines.size()) setCursor(lines.size() - 1, lines.get(lines.size() - 1).length(), extend);
-        else setCursor(target, Math.min(desired, lines.get(target).length()), extend);
+        int row = rowIndex(cursorLine) + delta;
+        if (row < 0) setCursor(0, 0, extend);
+        else if (row >= lineOfRow.length) {
+            int l = lineAtRow(lineOfRow.length - 1);
+            setCursor(l, lines.get(l).length(), extend);
+        } else {
+            int t = lineAtRow(row);
+            setCursor(t, Math.min(desired, lines.get(t).length()), extend);
+        }
         desiredColumn = desired;
     }
 
@@ -955,8 +1365,11 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     private void restore(Snapshot s) {
+        List<String> oldLines = new ArrayList<>(lines);
+        int[] oldEnd = foldEnd.clone();
         lines.clear();
         lines.addAll(s.lines());
+        remapFolds(oldLines, oldEnd);
         cursorLine = s.cl();
         cursorColumn = s.cc();
         selLine = s.sl();
@@ -990,6 +1403,7 @@ public class CodeEditorWidget extends AbstractWidget {
         String firstPart = lines.get(sl).substring(0, sc);
         String lastPart = lines.get(el).substring(ec);
         String[] parts = text.split("\n", -1);
+        int lineCountBefore = lines.size();
 
         for (int i = el; i > sl; i--) lines.remove(i);
 
@@ -1005,6 +1419,7 @@ public class CodeEditorWidget extends AbstractWidget {
             cursorColumn = parts[parts.length - 1].length();
         }
 
+        shiftFolds(sl, el, lines.size() - lineCountBefore);
         clearSelection();
         afterEdit();
     }
@@ -1072,8 +1487,11 @@ public class CodeEditorWidget extends AbstractWidget {
     // ---- line operations ----
     private void deleteLines(int l1, int l2) {
         recordUndo(KIND_NONE);
+        List<String> oldLines = new ArrayList<>(lines);
+        int[] oldEnd = foldEnd.clone();
         for (int i = l2; i >= l1; i--) lines.remove(i);
         if (lines.isEmpty()) lines.add("");
+        remapFolds(oldLines, oldEnd);
         cursorLine = Math.min(l1, lines.size() - 1);
         cursorColumn = Math.min(cursorColumn, lines.get(cursorLine).length());
         clearSelection();
@@ -1085,9 +1503,12 @@ public class CodeEditorWidget extends AbstractWidget {
         if (delta < 0 && r[0] == 0) return;
         if (delta > 0 && r[1] == lines.size() - 1) return;
         recordUndo(KIND_NONE);
+        List<String> oldLines = new ArrayList<>(lines);
+        int[] oldEnd = foldEnd.clone();
         List<String> block = new ArrayList<>(lines.subList(r[0], r[1] + 1));
         for (int i = 0; i < block.size(); i++) lines.remove(r[0]);
         lines.addAll(r[0] + delta, block);
+        remapFolds(oldLines, oldEnd);
         cursorLine += delta;
         if (selLine != -1) selLine += delta;
         closeAutocomplete();
@@ -1097,6 +1518,8 @@ public class CodeEditorWidget extends AbstractWidget {
     private void duplicateLines(boolean down) {
         int[] r = selectedLineRange();
         recordUndo(KIND_NONE);
+        List<String> oldLines = new ArrayList<>(lines);
+        int[] oldEnd = foldEnd.clone();
         List<String> block = new ArrayList<>(lines.subList(r[0], r[1] + 1));
         if (down) {
             lines.addAll(r[1] + 1, block);
@@ -1105,6 +1528,7 @@ public class CodeEditorWidget extends AbstractWidget {
         } else {
             lines.addAll(r[0], block);
         }
+        remapFolds(oldLines, oldEnd);
         closeAutocomplete();
         afterEdit();
     }
@@ -1486,6 +1910,8 @@ public class CodeEditorWidget extends AbstractWidget {
 
         // ---- ctrl shortcuts ----
         if (ctrl) {
+            if (shift && keyCode == GLFW.GLFW_KEY_LEFT_BRACKET) { foldAtCursor(true); return true; }
+            if (shift && keyCode == GLFW.GLFW_KEY_RIGHT_BRACKET) { foldAtCursor(false); return true; }
             if (name.equals("a")) { selectAll(); return true; }
             if (name.equals("c")) { copySelection(); return true; }
             if (name.equals("x")) { cutSelection(); return true; }
@@ -1554,16 +1980,18 @@ public class CodeEditorWidget extends AbstractWidget {
     // =====================================================================
     private int[] getLineColumnAt(double mouseX, double mouseY) {
         Font f = font();
-        int line = clamp(Math.floorDiv((int) mouseY - getY() - 5 + scrollY, LH), 0, lines.size() - 1);
+        int row = clamp(Math.floorDiv((int) mouseY - getY() - 5 + scrollY, LH), 0, rowCount() - 1);
+        int line = lineAtRow(row);
         String s = lines.get(line);
         int relX = (int) mouseX - textOrigin();
 
         int col = 0;
         int acc = 0;
         for (int i = 0; i < s.length(); i++) {
+            int sw = hasSwatchAt(line, i) ? SWATCH_W : 0;
             int w = f.width(String.valueOf(s.charAt(i)));
-            if (relX < acc + w / 2) break;
-            acc += w;
+            if (relX < acc + sw + w / 2) break;
+            acc += sw + w;
             col = i + 1;
         }
         return new int[]{line, col};
@@ -1579,6 +2007,53 @@ public class CodeEditorWidget extends AbstractWidget {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // ---- colour swatches + picker ----
+        if (button == 0 && !readOnly) {
+            if (pickerOpen) {
+                int[] r = pickerRect();
+                boolean inside = mouseX >= r[0] && mouseX <= r[0] + r[2] && mouseY >= r[1] && mouseY <= r[1] + r[3];
+                if (inside) {
+                    int svx = r[0] + 6, svy = r[1] + 6, hx = r[0] + 102;
+                    if (mouseX >= svx && mouseX < svx + PK_SV_W && mouseY >= svy && mouseY < svy + PK_SV_H) {
+                        pickerDrag = 1;
+                        pickerDragTo(mouseX, mouseY);
+                    } else if (mouseX >= hx - 2 && mouseX < hx + PK_HUE_W + 2
+                            && mouseY >= svy && mouseY < svy + PK_SV_H) {
+                        pickerDrag = 2;
+                        pickerDragTo(mouseX, mouseY);
+                    }
+                    return true;
+                }
+                ColorLit swOpen = swatchAt(mouseX, mouseY);
+                boolean same = swOpen != null && swOpen.line() == pickerLine && swOpen.start() == pickerStart;
+                closeAutocomplete();
+                if (same) return true;
+            }
+
+            ColorLit sw = swatchAt(mouseX, mouseY);
+            if (sw != null) {
+                setFocused(true);
+                openPicker(sw);
+                return true;
+            }
+        }
+
+        // ---- fold arrows / "..." marker ----
+        if (button == 0 && !readOnly) {
+            int arrow = foldArrowAt(mouseX, mouseY);
+            if (arrow >= 0) {
+                setFocused(true);
+                toggleFold(arrow);
+                return true;
+            }
+            int marker = foldedMarkerAt(mouseX, mouseY);
+            if (marker >= 0) {
+                setFocused(true);
+                toggleFold(marker);
+                return true;
+            }
+        }
+
         // ---- scrollbars ----
         if (button == 0) {
             if (overVerticalBar(mouseX, mouseY)) {
@@ -1676,6 +2151,11 @@ public class CodeEditorWidget extends AbstractWidget {
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (button != 0) return false;
 
+        if (pickerDrag != 0) {
+            pickerDragTo(mouseX, mouseY);
+            return true;
+        }
+
         if (draggingV) {
             int[] t = vThumb();
             if (t != null) {
@@ -1716,6 +2196,10 @@ public class CodeEditorWidget extends AbstractWidget {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (pickerDrag != 0) {
+            pickerDrag = 0;
+            return true;
+        }
         boolean was = isDragging || draggingV || draggingH;
         if (button == 0) {
             draggingV = false;
@@ -1750,8 +2234,9 @@ public class CodeEditorWidget extends AbstractWidget {
     private HelpWordHit getHelpWordAt(double mouseX, double mouseY) {
         int relY = (int) mouseY - getY() - 5 + scrollY;
         if (relY < 0) return null;
-        int lineIndex = relY / LH;
-        if (lineIndex >= lines.size()) return null;
+        int helpRow = relY / LH;
+        if (helpRow >= lineOfRow.length) return null;
+        int lineIndex = lineOfRow[helpRow];
         if (mouseX < textLeft()) return null;
 
         int[] pos = getLineColumnAt(mouseX, mouseY);
@@ -1764,6 +2249,7 @@ public class CodeEditorWidget extends AbstractWidget {
         int acc = 0;
         int column = line.length();
         for (int i = 0; i < line.length(); i++) {
+            if (hasSwatchAt(lineIndex, i)) acc += SWATCH_W;
             acc += f.width(String.valueOf(line.charAt(i)));
             if (acc > relX) { column = i; break; }
         }
@@ -1780,9 +2266,213 @@ public class CodeEditorWidget extends AbstractWidget {
     // =====================================================================
     // AUTOCOMPLETE
     // =====================================================================
-    public boolean isAutocompleteOpen() { return autocompleteOpen; }
+    // =====================================================================
+    // COLOUR LITERALS + PICKER
+    // =====================================================================
+    private static boolean isHex(String s, int from, int to) {
+        for (int i = from; i < to; i++) {
+            if (Character.digit(s.charAt(i), 16) < 0) return false;
+        }
+        return true;
+    }
+
+    /** 0xFF0000 (number) or "#FF0000" / '#FF0000' (string). */
+    private ColorLit parseColor(int line, Token t) {
+        String s = t.text();
+
+        if (t.type() == Type.NUMBER && s.length() == 8 && s.charAt(0) == '0'
+                && (s.charAt(1) == 'x' || s.charAt(1) == 'X') && isHex(s, 2, 8)) {
+            return new ColorLit(line, t.start(), t.end(), Integer.parseInt(s.substring(2), 16));
+        }
+
+        if (t.type() == Type.STRING && !t.unterminated() && s.length() == 9
+                && (s.charAt(0) == '"' || s.charAt(0) == '\'') && s.charAt(8) == s.charAt(0)
+                && s.charAt(1) == '#' && isHex(s, 2, 8)) {
+            return new ColorLit(line, t.start(), t.end(), Integer.parseInt(s.substring(2, 8), 16));
+        }
+        return null;
+    }
+
+    private void scanColors() {
+        colorsByLine = new ArrayList<>(lines.size());
+        maxColorsPerLine = 0;
+
+        for (int i = 0; i < lines.size(); i++) {
+            List<ColorLit> list = new ArrayList<>();
+            for (Token t : lineTokens.get(i)) {
+                ColorLit c = parseColor(i, t);
+                if (c != null) list.add(c);
+            }
+            colorsByLine.add(list);
+            maxColorsPerLine = Math.max(maxColorsPerLine, list.size());
+        }
+    }
+
+    /** The colour square under the mouse (it sits directly in front of the colour literal). */
+    private ColorLit swatchAt(double mx, double my) {
+        if (readOnly || colorsByLine.isEmpty()) return null;
+        if (mx < textLeft() || mx >= getX() + width - SB) return null;
+        if (my < getY() || my >= getY() + viewH()) return null;
+
+        int row = Math.floorDiv((int) my - getY() - 5 + scrollY, LH);
+        if (row < 0 || row >= lineOfRow.length) return null;
+        int line = lineOfRow[row];
+        if (line >= colorsByLine.size()) return null;
+
+        int ly = lineTop(line);
+        if (my < ly - 1 || my > ly + 10) return null;
+
+        for (ColorLit c : colorsByLine.get(line)) {
+            int sx = xOf(line, c.start());
+            if (mx >= sx - 1 && mx < sx + SWATCH_W) return c;
+        }
+        return null;
+    }
+
+    private static int hsvToRgb(float h, float s, float v) {
+        float hh = (h - (float) Math.floor(h)) * 6f;
+        int i = (int) hh;
+        float f = hh - i;
+        float p = v * (1 - s);
+        float q = v * (1 - s * f);
+        float t = v * (1 - s * (1 - f));
+        float r, g, b;
+        switch (i % 6) {
+            case 0 -> { r = v; g = t; b = p; }
+            case 1 -> { r = q; g = v; b = p; }
+            case 2 -> { r = p; g = v; b = t; }
+            case 3 -> { r = p; g = q; b = v; }
+            case 4 -> { r = t; g = p; b = v; }
+            default -> { r = v; g = p; b = q; }
+        }
+        return (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
+    }
+
+    private void setPickerFromRgb(int rgb) {
+        float r = ((rgb >> 16) & 0xFF) / 255f;
+        float g = ((rgb >> 8) & 0xFF) / 255f;
+        float b = (rgb & 0xFF) / 255f;
+        float max = Math.max(r, Math.max(g, b));
+        float min = Math.min(r, Math.min(g, b));
+        float d = max - min;
+
+        float h = 0;
+        if (d > 0) {
+            if (max == r) h = ((g - b) / d) % 6f;
+            else if (max == g) h = (b - r) / d + 2f;
+            else h = (r - g) / d + 4f;
+            h /= 6f;
+            if (h < 0) h += 1f;
+        }
+        pickerH = h;
+        pickerS = max == 0 ? 0 : d / max;
+        pickerV = max;
+    }
+
+    private void openPicker(ColorLit c) {
+        closeAutocomplete();
+
+        String src = lines.get(c.line()).substring(c.start(), c.end());
+        pickerLine = c.line();
+        pickerStart = c.start();
+        pickerEnd = c.end();
+        pickerString = src.charAt(0) == '"' || src.charAt(0) == '\'';
+        pickerQuote = pickerString ? src.charAt(0) : 0;
+        pickerPrefix = pickerString ? "#" : src.substring(0, 2);
+
+        String digits = pickerString ? src.substring(2, 8) : src.substring(2);
+        pickerLower = digits.chars().anyMatch(ch -> ch >= 'a' && ch <= 'f');
+
+        setPickerFromRgb(c.rgb());
+        pickerUndoDone = false;
+        pickerDrag = 0;
+        pickerOpen = true;
+    }
+
+    private int[] pickerRect() {
+        int anchor = pickerLine < lines.size() ? xOf(pickerLine, pickerStart) - 4 : getX() + 2;
+        int x = Math.max(textLeft(), Math.min(anchor, getX() + width - SB - PK_W - 2));
+        int y = lineTop(pickerLine) + LH + 3;
+        if (y + PK_H > getY() + height) y = lineTop(pickerLine) - PK_H - 3;
+        y = Math.max(getY() + 2, Math.min(y, getY() + height - PK_H - 2));
+        return new int[]{x, y, PK_W, PK_H};
+    }
+
+    private static float clamp01(double v) { return (float) Math.max(0, Math.min(1, v)); }
+
+    private void pickerDragTo(double mx, double my) {
+        int[] r = pickerRect();
+        if (pickerDrag == 1) {
+            pickerS = clamp01((mx - (r[0] + 6)) / (PK_SV_W - 1));
+            pickerV = 1f - clamp01((my - (r[1] + 6)) / (PK_SV_H - 1));
+        } else if (pickerDrag == 2) {
+            pickerH = clamp01((my - (r[1] + 6)) / (PK_SV_H - 1));
+        }
+        pickerApply();
+    }
+
+    /** Writes the chosen colour back into the source text (same length, so the cursor never moves). */
+    private void pickerApply() {
+        if (pickerLine >= lines.size()) { closeAutocomplete(); return; }
+        String line = lines.get(pickerLine);
+        if (pickerStart > pickerEnd || pickerEnd > line.length()) { closeAutocomplete(); return; }
+
+        String hex = String.format("%06X", hsvToRgb(pickerH, pickerS, pickerV) & 0xFFFFFF);
+        if (pickerLower) hex = hex.toLowerCase(Locale.ROOT);
+        String text = pickerString ? "" + pickerQuote + pickerPrefix + hex + pickerQuote : pickerPrefix + hex;
+
+        if (!pickerUndoDone) {          // the whole drag is ONE undo step
+            recordUndo(KIND_NONE);
+            pickerUndoDone = true;
+        }
+        lines.set(pickerLine, line.substring(0, pickerStart) + text + line.substring(pickerEnd));
+        rescan();
+    }
+
+    private void drawPicker(GuiGraphics g, Font f) {
+        if (pickerLine >= lines.size()) return;
+
+        int[] r = pickerRect();
+        int x = r[0], y = r[1];
+        g.fill(x, y, x + PK_W, y + PK_H, C_POPUP_BG);
+        g.renderOutline(x, y, PK_W, PK_H, C_POPUP_BORDER);
+
+        int svx = x + 6, svy = y + 6;
+        for (int i = 0; i < PK_SV_W; i++) {
+            float sat = i / (float) (PK_SV_W - 1);
+            g.fillGradient(svx + i, svy, svx + i + 1, svy + PK_SV_H,
+                    0xFF000000 | hsvToRgb(pickerH, sat, 1f), 0xFF000000);
+        }
+
+        int hx = x + 102;
+        int[] cols = {0xFF0000, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0xFF00FF, 0xFF0000};
+        for (int k = 0; k < 6; k++) {
+            int y1 = svy + k * PK_SV_H / 6;
+            int y2 = svy + (k + 1) * PK_SV_H / 6;
+            g.fillGradient(hx, y1, hx + PK_HUE_W, y2, 0xFF000000 | cols[k], 0xFF000000 | cols[k + 1]);
+        }
+
+        int mx = svx + Math.round(pickerS * (PK_SV_W - 1));
+        int my = svy + Math.round((1f - pickerV) * (PK_SV_H - 1));
+        g.renderOutline(mx - 4, my - 4, 9, 9, 0xFF000000);
+        g.renderOutline(mx - 3, my - 3, 7, 7, 0xFFFFFFFF);
+
+        int hy = svy + Math.round(pickerH * (PK_SV_H - 1));
+        g.fill(hx - 2, hy - 1, hx + PK_HUE_W + 2, hy + 2, 0xFF000000);
+        g.fill(hx - 1, hy, hx + PK_HUE_W + 1, hy + 1, 0xFFFFFFFF);
+
+        int rgb = hsvToRgb(pickerH, pickerS, pickerV) & 0xFFFFFF;
+        g.fill(x + 6, y + 94, x + 22, y + 106, 0xFF000000 | rgb);
+        g.renderOutline(x + 6, y + 94, 16, 12, C_POPUP_BORDER);
+        g.drawString(f, String.format("#%06X", rgb), x + 28, y + 96, C_POPUP_TEXT, false);
+    }
+
+    /** True while the suggestion list OR the colour picker is open (so Esc closes it first). */
+    public boolean isAutocompleteOpen() { return autocompleteOpen || pickerOpen; }
 
     public void closeAutocomplete() {
+        pickerOpen = false;
+        pickerDrag = 0;
         autocompleteOpen = false;
         suggestions.clear();
         autocompleteIndex = 0;
@@ -1848,11 +2538,11 @@ public class CodeEditorWidget extends AbstractWidget {
             List<Candidate> cands = new ArrayList<>();
             boolean afterImport = firstWord.equals("from") && prefix.stream().anyMatch(t -> t.is("import"));
 
-            if (afterImport && prefix.size() > 1 && LanguageSpec.IMPORTABLE_MODULES.contains(prefix.get(1).text())) {
+            if (afterImport && prefix.size() > 1 && enabledLibs.contains(prefix.get(1).text())) {
                 String mod = prefix.get(1).text();
                 for (String m : LanguageSpec.moduleMembers(mod)) cands.add(memberCandidate(mod, m));
             } else {
-                for (String m : new TreeSet<>(LanguageSpec.IMPORTABLE_MODULES)) cands.add(new Candidate(m, Kind.MODULE, "module"));
+                for (String m : enabledLibs) cands.add(new Candidate(m, Kind.MODULE, "module"));
             }
             suppressSuffix = true;
             filterAndOpen(cands, word);
@@ -1923,7 +2613,7 @@ public class CodeEditorWidget extends AbstractWidget {
             }
         }
 
-        for (String v : variables) out.putIfAbsent(v, new Candidate(v, Kind.VARIABLE, "variable"));
+        for (String v : visibleVariables(cursorLine)) out.putIfAbsent(v, new Candidate(v, Kind.VARIABLE, "variable"));
         for (String fn : functions) out.putIfAbsent(fn, new Candidate(fn, Kind.FUNCTION, "def"));
         for (String c : classes) out.putIfAbsent(c, new Candidate(c, Kind.CLASS, "class"));
         for (String fn : LanguageSpec.GLOBAL_FUNCTION_NAMES) {
@@ -2054,7 +2744,7 @@ public class CodeEditorWidget extends AbstractWidget {
 
         String line = lines.get(cursorLine);
         int sc = Math.min(autocompleteStartColumn, line.length());
-        int x = textOrigin() + f.width(line.substring(0, sc)) - 18;
+        int x = xOf(cursorLine, sc) - 18;
         int h = rows * AC_ROW_H + 2;
         int y = lineTop(cursorLine) + LH + 2;
         if (y + h > getY() + height) y = lineTop(cursorLine) - h - 2;

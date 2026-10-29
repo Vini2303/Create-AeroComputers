@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "net.tui.aerocomputers.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "CreativeModeTabMixin"
+  ],
+  "client": [
+    "CreativeInventoryMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

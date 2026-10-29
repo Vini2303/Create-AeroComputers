@@ -1,9 +1,17 @@
 {
   "item.createaerocomputers.hud_helmet": "HUD Helmet",
+  "item.createaerocomputers.raw_transformium": "Raw Transformium",
+  "item.createaerocomputers.transformium_ingot": "Transformium Ingot",
 
   "block.createaerocomputers.board_computer": "Board Computer",
   "block.createaerocomputers.hud_display": "HUD Display",
   "block.createaerocomputers.weapon_linker": "Weapon Linker",
+
+  "block.createaerocomputers.sensor": "Sensor",
+
+  "block.createaerocomputers.transformium": "Transformium",
+  "block.createaerocomputers.transformium_ore": "Transformium Ore",
+
 
   "creativetab.createaerocomputers.aerocomputers_tab": "AeroComputers",
 
@@ -18,6 +26,7 @@
 
   "tooltip.createaerocomputers.weapon_linker_shift": "can be placed on an MDF or ... or an Big Cannon Mound, can be linked to a board computer, to get access to the Weapons",
 
+  "tooltip.createaerocomputers.sensor_shift": "Place on a Sublevel to get information and telemetry",
 
   "help.aero.basics": "Basics",
   "help.aero.basics.text": "This is the basics of the Aero Computer.",
@@ -32,5 +41,10 @@
   "help.aero.code.text": "print(\"Hello World!\")",
 
   "help.aero.examples": "Examples",
-  "help.aero.examples.text": "var x = 10\nprint(x)"
+  "help.aero.examples.text": "var x = 10\nprint(x)",
+
+
+  "gui.createaerocomputers.banners.computer": "Computer",
+  "gui.createaerocomputers.banners.kinetics": "Kinetics",
+  "gui.createaerocomputers.banners.transformer": "Transformer"
 }

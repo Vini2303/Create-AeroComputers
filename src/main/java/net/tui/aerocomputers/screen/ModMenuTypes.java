@@ -9,9 +9,7 @@ import net.neoforged.neoforge.network.IContainerFactory;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import net.tui.aerocomputers.AeroComputers;
-import net.tui.aerocomputers.screen.custom.BoardComputerMenu;
-import net.tui.aerocomputers.screen.custom.HudDisplayMenu;
-import net.tui.aerocomputers.screen.custom.WeaponLinkerMenu;
+import net.tui.aerocomputers.screen.custom.*;
 
 public class ModMenuTypes {
     public static final DeferredRegister<MenuType<?>> MENUS =
@@ -23,8 +21,14 @@ public class ModMenuTypes {
     public static final DeferredHolder<MenuType<?>, MenuType<HudDisplayMenu>> HUDDISPLAY_MENU =
             registerMenuType("hud_diplay_menu", HudDisplayMenu::new);
 
+    public static final DeferredHolder<MenuType<?>, MenuType<HudMenu>> HUD_MENU =
+            registerMenuType("hud_menu", HudMenu::new);
+
     public static final DeferredHolder<MenuType<?>, MenuType<WeaponLinkerMenu>> WEAPONLINKER_MENU =
             registerMenuType("weapon_linker_menu", WeaponLinkerMenu::new);
+
+    public static final DeferredHolder<MenuType<?>, MenuType<SensorMenu>> SENSOR_MENU =
+            registerMenuType("sensor_menu", SensorMenu::new);
 
     private static <T extends AbstractContainerMenu>DeferredHolder<MenuType<?>, MenuType<T>> registerMenuType(String name, IContainerFactory<T> factory) {
         return MENUS.register(name, () -> IMenuTypeExtension.create(factory));

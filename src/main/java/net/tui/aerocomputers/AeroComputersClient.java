@@ -1,17 +1,11 @@
 package net.tui.aerocomputers;
 
-import com.simibubi.create.api.registry.CreateRegistries;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntityVisual;
 import dev.engine_room.flywheel.api.visual.BlockEntityVisual;
 import dev.engine_room.flywheel.api.visualization.BlockEntityVisualizer;
 import dev.engine_room.flywheel.api.visualization.VisualizationContext;
 import dev.engine_room.flywheel.api.visualization.VisualizerRegistry;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.blockentity.BlockEntityRenderers;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.InteractionHand;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
@@ -23,16 +17,12 @@ import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
+import net.tui.aerocomputers.block.entity.SensorBlockEntity;
 import net.tui.aerocomputers.client.CameraFeed;
 import net.tui.aerocomputers.client.HudOverlay;
-import net.tui.aerocomputers.renderer.BoardComputerRenderer;
-import net.tui.aerocomputers.renderer.BoardComputerVisual;
-import net.tui.aerocomputers.renderer.HudDisplayRenderer;
+import net.tui.aerocomputers.renderer.*;
 import net.tui.aerocomputers.screen.ModMenuTypes;
-import net.tui.aerocomputers.screen.custom.BoardComputerScreen;
-import net.tui.aerocomputers.screen.custom.HudDisplayScreen;
-import net.tui.aerocomputers.screen.custom.HudScreen;
-import net.tui.aerocomputers.screen.custom.WeaponLinkerScreen;
+import net.tui.aerocomputers.screen.custom.*;
 
 // This class will not load on dedicated servers. Accessing client side code from here is safe.
 @Mod(value = AeroComputers.MOD_ID, dist = Dist.CLIENT)
@@ -58,12 +48,16 @@ public class AeroComputersClient {
     public static void registerScreens(RegisterMenuScreensEvent event) {
         event.register(ModMenuTypes.BOARDCOMPUTER_MENU.get(), BoardComputerScreen::new);
         event.register(ModMenuTypes.HUDDISPLAY_MENU.get(), HudDisplayScreen::new);
+        event.register(ModMenuTypes.HUD_MENU.get(), HudScreen::new);
         event.register(ModMenuTypes.WEAPONLINKER_MENU.get(), WeaponLinkerScreen::new);
+        event.register(ModMenuTypes.SENSOR_MENU.get(), SensorScreen::new);
     }
 
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(ModBlockEntitys.BOARDCOMPUTER_BE.get(), BoardComputerRenderer::new);
+        event.registerBlockEntityRenderer(ModBlockEntitys.SENSOR_BE.get(), SensorRenderer::new);
+
         event.registerBlockEntityRenderer(ModBlockEntitys.HUDDISPLAY_BE.get(), HudDisplayRenderer::new);
     }
 
@@ -87,6 +81,18 @@ public class AeroComputersClient {
 
             @Override
             public boolean skipVanillaRender(BoardComputerBlockEntity blockEntity) {
+                return !CameraFeed.isCameraLevel(blockEntity.getLevel());
+            }
+        });
+
+        VisualizerRegistry.setVisualizer(ModBlockEntitys.SENSOR_BE.get(), new BlockEntityVisualizer<SensorBlockEntity>() {
+            @Override
+            public BlockEntityVisual<? super SensorBlockEntity> createVisual(VisualizationContext ctx, SensorBlockEntity blockEntity, float partialTick) {
+                return new SensorVisual(ctx, blockEntity, partialTick);
+            }
+
+            @Override
+            public boolean skipVanillaRender(SensorBlockEntity blockEntity) {
                 return !CameraFeed.isCameraLevel(blockEntity.getLevel());
             }
         });

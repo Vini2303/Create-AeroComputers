@@ -24,6 +24,11 @@ public class ModCreativeModeTabs {
                         output.accept(ModBlocks.HUDDISPLAY);
                         output.accept(ModBlocks.WEAPONLINKER);
 
+                        output.accept(ModBlocks.TRANSFORMIUM);
+                        output.accept(ModBlocks.TRANSFORMIUMORE);
+                        output.accept(ModItems.RAW_TRANSFORMIUM);
+                        output.accept(ModItems.TRANSFORMIUM_INGOT);
+
                     }).build());
 
 

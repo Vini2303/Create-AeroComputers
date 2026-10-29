@@ -14,7 +14,8 @@ import net.tui.aerocomputers.block.entity.HudDisplayBlockEntity;
 
 public record HudDisplayEntryPayload(
         BlockPos pos,
-        String text
+        String freq_one,
+        String freq_two
 ) implements CustomPacketPayload {
 
     public static final Type<HudDisplayEntryPayload> TYPE =
@@ -25,7 +26,9 @@ public record HudDisplayEntryPayload(
                     BlockPos.STREAM_CODEC,
                     HudDisplayEntryPayload::pos,
                     ByteBufCodecs.stringUtf8(32767),
-                    HudDisplayEntryPayload::text,
+                    HudDisplayEntryPayload::freq_one,
+                    ByteBufCodecs.stringUtf8(32767),
+                    HudDisplayEntryPayload::freq_two,
                     HudDisplayEntryPayload::new
             );
 
@@ -59,7 +62,7 @@ public record HudDisplayEntryPayload(
                 return;
             }
 
-            hud.setEntry(payload.text());
+            hud.setFreq(payload.freq_one(), payload.freq_two());
             hud.setChanged();
         });
     }

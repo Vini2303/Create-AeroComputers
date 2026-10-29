@@ -54,9 +54,14 @@ public final class HudScriptApi {
 
             @Override
             public Object getMemberKeys() {
-                return new String[]{"x", "x1", "y", "y1", "x2", "y2", "text", "color",
-                        "center_color", "border_color", "font_size", "width", "border_width",
-                        "w", "h", "xs", "ys", "render_center", "render_border", "remove"};
+                return new String[]{
+                        "freq_one", "freq_two",
+                        "x", "x1", "y", "y1", "x2", "y2",
+                        "text", "color", "center_color", "border_color",
+                        "font_size", "width", "border_width",
+                        "w", "h", "xs", "ys",
+                        "render_center", "render_border", "remove"
+                };
             }
 
             @Override

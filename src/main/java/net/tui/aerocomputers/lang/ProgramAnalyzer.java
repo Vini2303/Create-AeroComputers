@@ -169,6 +169,35 @@ public final class ProgramAnalyzer {
         }
     }
 
+    /**
+     * Names one statement line binds: for-targets, "except ... as x" and assignments.
+     * Takes the significant tokens of the line. Used by the editor for scope aware suggestions.
+     */
+    public static void lineVariables(List<PyLexer.Token> toks, Set<String> out) {
+        if (toks.isEmpty()) return;
+        PyLexer.Token first = toks.get(0);
+        String word = first.type() == PyLexer.Type.IDENT ? first.text() : "";
+
+        switch (word) {
+            case "for" -> {
+                for (int k = 1; k < toks.size(); k++) {
+                    PyLexer.Token t = toks.get(k);
+                    if (t.is("in")) break;
+                    if (t.type() == PyLexer.Type.IDENT && !LanguageSpec.isKeyword(t.text())) out.add(t.text());
+                }
+            }
+            case "except" -> {
+                for (int k = 1; k + 1 < toks.size(); k++) {
+                    if (toks.get(k).is("as") && toks.get(k + 1).type() == PyLexer.Type.IDENT) {
+                        out.add(toks.get(k + 1).text());
+                    }
+                }
+            }
+            case "def", "class", "import", "from", "if", "elif", "while", "else", "try", "finally", "with" -> { }
+            default -> collectAssigned(toks, out);
+        }
+    }
+
     static int indentOf(String line) {
         int n = 0;
         for (int i = 0; i < line.length(); i++) {

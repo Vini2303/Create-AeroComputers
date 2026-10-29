@@ -8,6 +8,7 @@ import net.tui.aerocomputers.config.AeroComputersConfig;
 import net.tui.aerocomputers.item.ModCreativeModeTabs;
 import net.tui.aerocomputers.item.ModItems;
 import net.tui.aerocomputers.network.ModNetworking;
+import net.tui.aerocomputers.registries.SensorRegistry;
 import net.tui.aerocomputers.screen.ModMenuTypes;
 import org.slf4j.Logger;
 
@@ -67,5 +68,6 @@ public class AeroComputers {
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent event) {
         ComputerRegistry.clear();
+        SensorRegistry.clear();
     }
 }

@@ -15,6 +15,9 @@ import java.util.TreeSet;
  *
  * BUILTIN_FUNCTIONS / NATIVE_CLASSES are keyed by the QUALIFIED name ("math.sqrt", "hud.Label").
  * Global functions (print, len, ...) have no prefix.
+ *
+ * Which libraries may actually be imported is decided by the server config; this class only
+ * holds a CATALOG of what is known about the standard library modules (members + parameters).
  * Must stay free of any Minecraft classes.
  */
 public final class LanguageSpec {
@@ -85,80 +88,86 @@ public final class LanguageSpec {
             Map.entry("zip", List.of("a", "b"))
     );
 
-    /** module -> function name -> parameter names */
-    public static final Map<String, Map<String, List<String>>> FUNCTION_MODULES = Map.of(
-            // the REAL python math module: radians, needs "import math"
-            "math", Map.ofEntries(
-                    Map.entry("sqrt", List.of("x")),
-                    Map.entry("sin", List.of("x")),
-                    Map.entry("cos", List.of("x")),
-                    Map.entry("tan", List.of("x")),
-                    Map.entry("asin", List.of("x")),
-                    Map.entry("acos", List.of("x")),
-                    Map.entry("atan", List.of("x")),
-                    Map.entry("atan2", List.of("y", "x")),
-                    Map.entry("floor", List.of("x")),
-                    Map.entry("ceil", List.of("x")),
-                    Map.entry("fabs", List.of("x")),
-                    Map.entry("pow", List.of("x", "y")),
-                    Map.entry("exp", List.of("x")),
-                    Map.entry("log", List.of("x")),
-                    Map.entry("hypot", List.of("x", "y")),
-                    Map.entry("radians", List.of("x")),
-                    Map.entry("degrees", List.of("x")),
-                    Map.entry("copysign", List.of("x", "y"))
-            ),
-            "aero", Map.of(
-                    "getPos", List.of(),
-                    "getRot", List.of(),
-                    "getVel", List.of(),
-                    "radar", List.of(),
-                    "send", List.of("name_id", "message"),
-                    "read", List.of(),
-                    "clear", List.of()
-            ),
-            "bigc", Map.of(
-                    "aimangel", List.of("pitch", "yaw"),
-                    "fire", List.of("rate"),
-                    "aimpos", List.of("pos")
-            ),
-            "slrw", Map.of(
-                    "firechin", List.of("fire"),
-                    "aimchinangel", List.of("pitch", "yaw"),
-                    "aimchinpos", List.of("pos")
-            )
+    /** modules that exist without an import (injected by the mod) */
+    public static final Set<String> PRELOADED_MODULES = Set.of("aero", "hud", "bigc", "slrw");
+
+    /** module -> function name -> parameter names  ("name:p1,p2") */
+    public static final Map<String, Map<String, List<String>>> FUNCTION_MODULES = Map.ofEntries(
+            // ---- mod API ----
+            Map.entry("aero", fns("getPos:sensor_freq", "getRot:sensor_freq", "getVel:sensor_freq", "radar:sensor_freq", "send:name_id,message", "read", "clear")),
+            Map.entry("bigc", fns("aimangel:pitch,yaw", "fire:rate", "aimpos:pos")),
+            Map.entry("slrw", fns("firechin:fire", "aimchinangel:pitch,yaw", "aimchinpos:pos")),
+
+            // ---- standard library (real Python semantics; needs "import x") ----
+            Map.entry("math", fns("sqrt:x", "sin:x", "cos:x", "tan:x", "asin:x", "acos:x", "atan:x", "atan2:y,x",
+                    "sinh:x", "cosh:x", "tanh:x", "floor:x", "ceil:x", "trunc:x", "fabs:x", "fmod:x,y", "pow:x,y",
+                    "exp:x", "log:x,base", "log10:x", "log2:x", "hypot:x,y", "radians:x", "degrees:x",
+                    "copysign:x,y", "isnan:x", "isinf:x", "isfinite:x", "isclose:a,b", "factorial:n", "gcd:a,b",
+                    "dist:p,q", "prod:iterable")),
+            Map.entry("cmath", fns("sqrt:x", "exp:x", "log:x", "sin:x", "cos:x", "phase:x", "polar:x", "rect:r,phi")),
+            Map.entry("random", fns("random", "randint:a,b", "randrange:start,stop", "choice:seq",
+                    "choices:population,k", "shuffle:x", "sample:population,k", "uniform:a,b", "gauss:mu,sigma",
+                    "seed:a", "getrandbits:k", "triangular:low,high")),
+            Map.entry("time", fns("time", "time_ns", "monotonic", "perf_counter", "process_time", "sleep:seconds")),
+            Map.entry("statistics", fns("mean:data", "fmean:data", "median:data", "median_low:data",
+                    "median_high:data", "mode:data", "stdev:data", "variance:data", "pstdev:data", "pvariance:data")),
+            Map.entry("itertools", fns("count:start,step", "cycle:iterable", "repeat:object,times", "chain:a,b",
+                    "accumulate:iterable", "combinations:iterable,r", "permutations:iterable,r", "product:a,b",
+                    "islice:iterable,stop", "zip_longest:a,b", "groupby:iterable", "starmap:function,iterable",
+                    "takewhile:predicate,iterable", "dropwhile:predicate,iterable")),
+            Map.entry("functools", fns("reduce:function,iterable", "partial:func", "lru_cache:maxsize",
+                    "wraps:wrapped", "cmp_to_key:mycmp")),
+            Map.entry("collections", fns("namedtuple:typename,field_names")),
+            Map.entry("string", fns("capwords:s")),
+            Map.entry("json", fns("dumps:obj", "loads:s", "dump:obj,fp", "load:fp")),
+            Map.entry("re", fns("compile:pattern", "match:pattern,string", "search:pattern,string",
+                    "fullmatch:pattern,string", "findall:pattern,string", "finditer:pattern,string",
+                    "sub:pattern,repl,string", "split:pattern,string", "escape:pattern")),
+            Map.entry("operator", fns("add:a,b", "sub:a,b", "mul:a,b", "truediv:a,b", "floordiv:a,b", "mod:a,b",
+                    "neg:obj", "eq:a,b", "ne:a,b", "lt:a,b", "le:a,b", "gt:a,b", "ge:a,b", "not_:obj",
+                    "itemgetter:item", "attrgetter:attr")),
+            Map.entry("heapq", fns("heappush:heap,item", "heappop:heap", "heapify:x", "heappushpop:heap,item",
+                    "heapreplace:heap,item", "nlargest:n,iterable", "nsmallest:n,iterable")),
+            Map.entry("bisect", fns("bisect:a,x", "bisect_left:a,x", "bisect_right:a,x", "insort:a,x",
+                    "insort_left:a,x", "insort_right:a,x")),
+            Map.entry("copy", fns("copy:x", "deepcopy:x"))
     );
 
     /** module -> class name -> constructor parameter names */
-    public static final Map<String, Map<String, List<String>>> CLASS_MODULES = Map.of(
-            "hud", Map.of(
-                    "Label", List.of("x", "y", "text", "color", "font_size"),
-                    "Line", List.of("x1", "y1", "x2", "y2", "width", "color"),
-                    "Rect", List.of("x", "y", "w", "h", "border_width", "center_color", "border_color", "render_center", "render_border"),
-                    "Poly", List.of("xs", "ys", "border_width", "border_color"),
-                    "Cam", List.of("x", "y", "width", "height")
-            )
+    public static final Map<String, Map<String, List<String>>> CLASS_MODULES = Map.ofEntries(
+            Map.entry("hud", fns("Label:hud_freq,x,y,text,color,font_size",
+                    "Line:hud_freq,x1,y1,x2,y2,width,color",
+                    "Rect:hud_freq,x,y,w,h,border_width,center_color,border_color,render_center,render_border",
+                    "Poly:hud_freq,xs,ys,border_width,border_color",
+                    "Cam:hud_freq,x,y,width,height")),
+            Map.entry("collections", fns("deque:iterable,maxlen", "Counter:iterable", "OrderedDict",
+                    "defaultdict:default_factory")),
+            Map.entry("random", fns("Random:seed")),
+            Map.entry("datetime", fns("datetime:year,month,day", "date:year,month,day", "timedelta:days,seconds")),
+            Map.entry("fractions", fns("Fraction:numerator,denominator")),
+            Map.entry("decimal", fns("Decimal:value"))
     );
 
     /** module -> non-callable members (math.pi) */
-    public static final Map<String, List<String>> MODULE_CONSTANTS = Map.of(
-            "math", List.of("pi", "e", "tau", "inf")
+    public static final Map<String, List<String>> MODULE_CONSTANTS = Map.ofEntries(
+            Map.entry("math", List.of("pi", "e", "tau", "inf", "nan")),
+            Map.entry("cmath", List.of("pi", "e", "tau", "inf", "nan")),
+            Map.entry("string", List.of("ascii_letters", "ascii_lowercase", "ascii_uppercase", "digits",
+                    "hexdigits", "octdigits", "punctuation", "printable", "whitespace")),
+            Map.entry("re", List.of("IGNORECASE", "MULTILINE", "DOTALL", "VERBOSE", "ASCII"))
     );
 
-    /** modules that need "import x" (the runtime only allows these) */
-    public static final Set<String> IMPORTABLE_MODULES = Set.of("math");
+    /** every library the catalog knows (what the config MAY enable); the config decides what is allowed */
+    public static final Set<String> IMPORTABLE_MODULES;
 
     /** qualified name ("math.sqrt") or global name ("print") -> parameter names */
     public static final Map<String, List<String>> BUILTIN_FUNCTIONS;
 
-    /** qualified class name ("hud.Label") -> constructor parameter names */
+    /** qualified class name ("hud.Label", "collections.deque") -> constructor parameter names */
     public static final Map<String, List<String>> NATIVE_CLASSES;
 
-    /** all module names */
+    /** all module names the catalog knows */
     public static final Set<String> MODULES;
-
-    /** modules that exist without an import (aero, hud, ...) */
-    public static final Set<String> PRELOADED_MODULES;
 
     static {
         Map<String, List<String>> functions = new LinkedHashMap<>(GLOBAL_FUNCTIONS);
@@ -176,9 +185,9 @@ public final class LanguageSpec {
         modules.addAll(MODULE_CONSTANTS.keySet());
         MODULES = Collections.unmodifiableSet(modules);
 
-        Set<String> preloaded = new TreeSet<>(modules);
-        preloaded.removeAll(IMPORTABLE_MODULES);
-        PRELOADED_MODULES = Collections.unmodifiableSet(preloaded);
+        Set<String> importable = new TreeSet<>(modules);
+        importable.removeAll(PRELOADED_MODULES);
+        IMPORTABLE_MODULES = Collections.unmodifiableSet(importable);
     }
 
     // Sorted lists so autocomplete order is stable (Set.of / Map.of iteration order is not).
@@ -190,12 +199,14 @@ public final class LanguageSpec {
         return CONTROL_KEYWORDS.contains(s) || DECLARATION_KEYWORDS.contains(s);
     }
 
-    /** Python builtins and math are positional-only; named-argument suggestions make no sense there. */
+    /** Python builtins and the standard library are positional-only for our purposes. */
     public static boolean isPositionalOnly(String qualifiedName) {
-        return GLOBAL_FUNCTIONS.containsKey(qualifiedName) || qualifiedName.startsWith("math.");
+        return GLOBAL_FUNCTIONS.containsKey(qualifiedName)
+                || (qualifiedName.contains(".") && !qualifiedName.startsWith("hud.")
+                && !PRELOADED_MODULES.contains(qualifiedName.substring(0, qualifiedName.indexOf('.'))));
     }
 
-    /** function, class and constant names inside a module, sorted */
+    /** function, class and constant names inside a module, sorted (empty for modules the catalog doesn't know) */
     public static List<String> moduleMembers(String module) {
         Set<String> members = new TreeSet<>();
 
@@ -217,6 +228,18 @@ public final class LanguageSpec {
         List<String> out = new ArrayList<>(params == null ? List.of() : params);
         out.add("remove");
         return out;
+    }
+
+    /** "name:p1,p2" -> name -> [p1, p2]; "name" -> no parameters */
+    private static Map<String, List<String>> fns(String... specs) {
+        Map<String, List<String>> m = new LinkedHashMap<>();
+        for (String spec : specs) {
+            int c = spec.indexOf(':');
+            String name = c < 0 ? spec : spec.substring(0, c);
+            String params = c < 0 ? "" : spec.substring(c + 1);
+            m.put(name, params.isEmpty() ? List.of() : List.of(params.split(",")));
+        }
+        return Collections.unmodifiableMap(m);
     }
 
     private static List<String> keywordNames() {

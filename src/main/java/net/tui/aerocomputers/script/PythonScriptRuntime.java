@@ -54,6 +54,16 @@ public final class PythonScriptRuntime implements AutoCloseable {
             _aero_next = _aero_builtins.next
             _aero_globals = _aero_builtins.globals
             _aero_StopIteration = _aero_builtins.StopIteration
+            _aero_type = _aero_builtins.type
+            _aero_hasattr = _aero_builtins.hasattr
+            _aero_getattr = _aero_builtins.getattr
+            _aero_callable = _aero_builtins.callable
+            _aero_len = _aero_builtins.len
+            _aero_range = _aero_builtins.range
+            _aero_str = _aero_builtins.str
+            _aero_list = _aero_builtins.list
+            _aero_tuple = _aero_builtins.tuple
+            _aero_dict = _aero_builtins.dict
             _aero_allowed_imports = set(_aero_allowed_imports_config.split(","))
 
             def _aero_safe_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -165,6 +175,29 @@ public final class PythonScriptRuntime implements AutoCloseable {
                         if alias.name != "*":
                             self.names.add(alias.asname or alias.name)
 
+            def _aero_pyval(v):
+                # Java lists arrive as foreign arrays; turn them into real Python lists
+                t = _aero_type(v)
+                if t is _aero_str or t is _aero_list or t is _aero_tuple or t is _aero_dict:
+                    return v
+                if _aero_hasattr(v, "__len__") and _aero_hasattr(v, "__getitem__"):
+                    return [_aero_pyval(v[i]) for i in _aero_range(_aero_len(v))]
+                return v
+
+            class _AeroApi:
+                def __init__(self, target):
+                    self._aero_target = target
+                def __getattr__(self, name):
+                    member = _aero_getattr(self._aero_target, name)
+                    if _aero_callable(member):
+                        def call(*args):
+                            return _aero_pyval(member(*args))
+                        return call
+                    return _aero_pyval(member)
+
+            def _aero_wrap_api(target):
+                return _AeroApi(target)
+
             def _aero_start(source):
                 tree = _aero_ast.parse(source, mode="exec")
                 assigned = __AeroAssignedNames()
@@ -206,9 +239,9 @@ public final class PythonScriptRuntime implements AutoCloseable {
 
             def _aero_get_names():
                 return [k for k in _aero_globals().keys() if not k.startswith("_aero_") and k not in ("aero", "hud", "__builtins__")]
-            return _aero_start, _aero_step_n, _aero_get_names
+            return _aero_start, _aero_step_n, _aero_get_names, _aero_wrap_api
 
-        _aero_start, _aero_step_n, _aero_get_names = _aero_make_runtime()
+        _aero_start, _aero_step_n, _aero_get_names, _aero_wrap_api = _aero_make_runtime()
         """;
 
     public PythonScriptRuntime(Object aeroApi, Object hudApi) {
@@ -239,7 +272,11 @@ public final class PythonScriptRuntime implements AutoCloseable {
         this.context = Context.newBuilder("python")
                 .engine(ENGINE)
                 .out(chatOutput)
-                .allowHostAccess(HostAccess.EXPLICIT)
+                // EXPLICIT + list/iterable access: Java Lists (getPos(), radar() ...) become indexable arrays
+                .allowHostAccess(HostAccess.newBuilder(HostAccess.EXPLICIT)
+                        .allowListAccess(true)
+                        .allowIterableAccess(true)
+                        .build())
                 .allowHostClassLookup(name -> false)
                 .allowIO(false)
                 .allowCreateThread(false)
@@ -250,12 +287,15 @@ public final class PythonScriptRuntime implements AutoCloseable {
                 .build();
         this.bindings = context.getBindings("python");
         bindings.putMember("_aero_allowed_imports_config", String.join(",", AeroComputersConfig.ALLOWED_LIBRARIES.get()));
-        bindings.putMember("aero", aeroApi instanceof AeroScriptApi api ? api.asProxy() : aeroApi);
         bindings.putMember("hud", hudApi);
 
         context.eval("python", BOOTSTRAP);
         this.startFn = bindings.getMember("_aero_start");
         this.stepFn = bindings.getMember("_aero_step_n");
+
+        // aero goes through the wrapper so its results are real Python lists
+        Object rawAero = aeroApi instanceof AeroScriptApi api ? api.asProxy() : aeroApi;
+        bindings.putMember("aero", bindings.getMember("_aero_wrap_api").execute(rawAero));
     }
 
     public void start(String source) {

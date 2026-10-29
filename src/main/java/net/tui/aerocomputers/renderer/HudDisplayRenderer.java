@@ -3,22 +3,18 @@ package net.tui.aerocomputers.renderer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.core.Direction;
-import net.minecraft.world.phys.Vec3;
 import net.tui.aerocomputers.block.custom.HudDisplayBlock;
 import net.tui.aerocomputers.block.entity.HudDisplayBlockEntity;
 import net.tui.aerocomputers.client.CameraFeed;
-import net.tui.aerocomputers.client.ClientHudRegistry;
-import net.tui.aerocomputers.network.BoardComputerChannelPayload;
+import net.tui.aerocomputers.registries.HudRegistry;
 import org.joml.Matrix4f;
 
-import java.awt.*;
 import java.util.List;
 
 public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEntity> {
@@ -26,7 +22,7 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
     /*
      * Virtual HUD resolution.
      *
-     * Everything in ClientHudRegistry uses these coordinates.
+     * Everything in HudRegistry uses these coordinates.
      */
     private static final float HUD_WIDTH = 640;
     private static final float HUD_HEIGHT = 640;
@@ -72,8 +68,8 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
             int packedLight,
             int packedOverlay
     ) {
-        List<ClientHudRegistry.DrawEntry> entries =
-                ClientHudRegistry.get(blockEntity.getEntry());
+        List<HudRegistry.DrawEntry> entries =
+                HudRegistry.get(blockEntity.getFreqOne(), blockEntity.getFreqTwo());
 
         if (entries.isEmpty()) {
             return;
@@ -129,7 +125,7 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
         );
 
         for (int i = 0; i < entries.size(); i++) {
-            ClientHudRegistry.DrawEntry e = entries.get(i);
+            HudRegistry.DrawEntry e = entries.get(i);
 
             poseStack.pushPose();
 
@@ -220,7 +216,7 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
     private void renderLabel(
             PoseStack poseStack,
             MultiBufferSource bufferSource,
-            ClientHudRegistry.DrawEntry e,
+            HudRegistry.DrawEntry e,
             int packedLight
     ) {
         poseStack.pushPose();
@@ -269,7 +265,7 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
     private void renderRect(
             PoseStack poseStack,
             MultiBufferSource bufferSource,
-            ClientHudRegistry.DrawEntry e,
+            HudRegistry.DrawEntry e,
             int packedLight
     ) {
         if (e.renderCenter()) {
@@ -388,7 +384,7 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
     private void renderLine(
             PoseStack poseStack,
             MultiBufferSource bufferSource,
-            ClientHudRegistry.DrawEntry e,
+            HudRegistry.DrawEntry e,
             int packedLight
     ) {
         renderLinePoints(
@@ -411,7 +407,7 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
     private void renderPoly(
             PoseStack poseStack,
             MultiBufferSource bufferSource,
-            ClientHudRegistry.DrawEntry e,
+            HudRegistry.DrawEntry e,
             int packedLight
     ) {
         List<Double> xs = e.xs();
@@ -540,7 +536,7 @@ public class HudDisplayRenderer implements BlockEntityRenderer<HudDisplayBlockEn
         ).setColor(r, g, b, a);
     }
 
-    private void renderCamera(PoseStack ps, MultiBufferSource buf, ClientHudRegistry.DrawEntry e, int light) {
+    private void renderCamera(PoseStack ps, MultiBufferSource buf, HudRegistry.DrawEntry e, int light) {
         if (CameraFeed.rendering) return;   // never sample the texture we're drawing into
 
         CameraFeed.requestFixed();
