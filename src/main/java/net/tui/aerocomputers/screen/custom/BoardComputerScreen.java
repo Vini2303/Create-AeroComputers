@@ -1,237 +1,304 @@
 package net.tui.aerocomputers.screen.custom;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.tui.aerocomputers.AeroComputers;
-import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
-import net.tui.aerocomputers.network.BoardComputerChannelPayload;
+import net.tui.aerocomputers.client.ClientFileState;
 import net.tui.aerocomputers.network.BoardComputerControlPayload;
-import net.tui.aerocomputers.network.BoardComputerEditPayload;
-import net.tui.aerocomputers.network.BoardComputerVariablePayload;
+import net.tui.aerocomputers.network.FileActionPayload;
 import net.tui.aerocomputers.screen.CodeEditorWidget;
+import net.tui.aerocomputers.screen.FileExplorerWidget;
 import net.tui.aerocomputers.screen.HelpWidget;
-import net.tui.aerocomputers.screen.ItemIconButton;
-import org.checkerframework.checker.units.qual.A;
+import net.tui.aerocomputers.screen.PopupSlot;
+import net.tui.aerocomputers.script.ComputerFiles;
+import org.jetbrains.annotations.Nullable;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
-import javax.swing.*;
-import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.regex.Pattern;
+import java.util.Locale;
 
 public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMenu> {
     private CodeEditorWidget editor;
 
-    private enum Tab { MEMORY, RL_INPUT, RL_OUTPUT }
-    private Tab currentTab = Tab.MEMORY;
-
-    private Button tabMemoryButton;
-    private Button tabInputButton;
-    private Button tabOutputButton;
-
-    // widgets belonging to the currently-shown side panel; cleared/rebuilt on every tab switch or data refresh
-    private final List<net.minecraft.client.gui.components.AbstractWidget> panelWidgets = new ArrayList<>();
-
-    private EditBox newVarNameBox;
-
-    private final ResourceLocation GUI_TEXTURE =
-            ResourceLocation.fromNamespaceAndPath(AeroComputers.MOD_ID, "textures/gui/board_computer/board_computer_gui.png");
-
-    private static final int PANEL_X = 10;
-    private static final int PANEL_Y = 50;
-    private static final int ROW_HEIGHT = 20;
-
-    private static final int PANEL_WIDTH = 145;
-    private static final int PANEL_HEIGHT = 140;
-
-    private int scrollOffset = 0;
+    private static final int MENU_BAR_HEIGHT = 24;
+    private static final int FILE_EXPLORER_X = 8;
+    private static final int FILE_EXPLORER_Y = 34;
+    private static final int FILE_EXPLORER_WIDTH = 128;
+    private int fileExplorerHeight;
+    private int editorWidth;
+    private int editorHeight;
 
     private EditBox boardNameBox;
-
     private int lastEditorCompletionUpdateId = -1;
-
     private HelpWidget helpWidget;
 
-    private final List<PendingChannelLoad> pendingChannelLoads = new ArrayList<>();
+    private FileExplorerWidget fileExplorer;
+    /** The file shown in the editor. null means no file is open. */
+    private @Nullable String currentFile = null;
+    private @Nullable String pendingOpen = null;
+    private @Nullable String resumeFile = null;
+    private int lastFileContentVersion = 0;
+    private boolean fileMenuOpen = false;
+    private boolean editMenuOpen = false;
+    private Button fileImportButton;
+    private Button fileExportButton;
+    private Button fileSaveButton;
+    private Button runStateButton;
+    private Button restartButton;
 
-    private record PendingChannelLoad(
-            BoardComputerChannelPayload.Direction direction,
-            String name,
-            String mode,
-            String freqA,
-            String freqB
-    ) {}
-
-    private int lastInputChannelCount = -1;
-    private int lastOutputChannelCount = -1;
 
     public BoardComputerScreen(BoardComputerMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.imageWidth = 468;
-        this.imageHeight = 329;
-        this.inventoryLabelY = 237;
-        this.titleLabelY = 8;
+        this.imageWidth = 640;
+        this.imageHeight = 360;
+        this.inventoryLabelY = -1000;
+        this.titleLabelY = -1000;
     }
 
     @Override
     protected void init() {
+        // AbstractContainerScreen uses GUI-scaled dimensions, so compute the layout
+        // from the current window size every time the screen is opened or resized.
+        // Use the full available GUI-scaled window; Minecraft recalculates width/height
+        // when the GUI scale, resolution, or fullscreen state changes.
+        this.imageWidth = this.width;
+        this.imageHeight = this.height;
+        this.fileExplorerHeight = Math.max(40, imageHeight - FILE_EXPLORER_Y - 8);
+        this.editorHeight = fileExplorerHeight;
+        this.editorWidth = Math.max(40, imageWidth - 150);
         super.init();
 
-        boardNameBox = new EditBox(
-                font,
-                leftPos + 90,
-                topPos + 5,
-                80,
-                14,
-                Component.empty()
-        );
+        currentFile = null;
+        pendingOpen = null;
+        lastFileContentVersion = ClientFileState.contentVersion;
 
+        savedOnClose = false;
+
+        // VS Code-style menu bar.
+        addRenderableWidget(Button.builder(Component.literal("File"), btn -> {
+            fileMenuOpen = !fileMenuOpen;
+            editMenuOpen = false;
+            updateMenuVisibility();
+        }).bounds(leftPos + 6, topPos + 4, 42, 18).build());
+
+        addRenderableWidget(Button.builder(Component.literal("Edit"), btn -> {
+            editMenuOpen = !editMenuOpen;
+            fileMenuOpen = false;
+            updateMenuVisibility();
+        }).bounds(leftPos + 50, topPos + 4, 42, 18).build());
+
+        addRenderableWidget(Button.builder(Component.literal("Help"), btn -> {
+                    fileMenuOpen = false;
+                    editMenuOpen = false;
+                    updateMenuVisibility();
+                    openHelp("help.aero.basics.text");
+                })
+                .bounds(leftPos + 94, topPos + 4, 46, 18).build());
+
+        addRenderableWidget(Button.builder(Component.literal("Exit"), btn -> onClose())
+                .bounds(leftPos + imageWidth - 52, topPos + 4, 46, 18).build());
+
+        // Edit menu contents.
+        boardNameBox = new EditBox(font, leftPos + 52, topPos + 27, 128, 18, Component.empty());
         boardNameBox.setValue(menu.blockEntity.getComputerName());
-
         boardNameBox.setMaxLength(32);
         boardNameBox.setTextColor(0xFFFFFFFF);
-        boardNameBox.setHint(Component.literal("Name..."));
+        boardNameBox.setHint(Component.literal("Computer name"));
+        boardNameBox.setResponder(name -> PacketDistributor.sendToServer(new BoardComputerControlPayload(
+                menu.blockEntity.getBlockPos(), BoardComputerControlPayload.Action.NAME, name)));
 
-        boardNameBox.setResponder(name -> {
-            PacketDistributor.sendToServer(
-                    new BoardComputerControlPayload(
-                            menu.blockEntity.getBlockPos(),
-                            BoardComputerControlPayload.Action.NAME,
-                            boardNameBox.getValue()
-                    )
-            );
-        });
+        runStateButton = Button.builder(Component.literal(menu.blockEntity.isRunning() ? "Pause" : "Run"), btn -> {
+            boolean newState = !menu.blockEntity.isRunning();
+            PacketDistributor.sendToServer(new BoardComputerControlPayload(menu.blockEntity.getBlockPos(),
+                    newState ? BoardComputerControlPayload.Action.PLAY : BoardComputerControlPayload.Action.PAUSE, ""));
+            btn.setMessage(Component.literal(newState ? "Pause" : "Run"));
+        }).bounds(leftPos + 52, topPos + 48, 62, 18).build();
 
-        addRenderableWidget(boardNameBox);
+        restartButton = Button.builder(Component.literal("Restart"), btn -> {
+            saveCurrentFile();
+            PacketDistributor.sendToServer(new BoardComputerControlPayload(
+                    menu.blockEntity.getBlockPos(), BoardComputerControlPayload.Action.RESTART, ""));
+        }).bounds(leftPos + 118, topPos + 48, 62, 18).build();
 
-        editor = new CodeEditorWidget(
-                leftPos + 181,
-                topPos + 13,
-                275,
-                303,
-                menu.blockEntity.getProgram(),
-                menu.blockEntity.getEditorCompletions(),
-                this::openHelp
-        );
+        fileImportButton = Button.builder(Component.literal("Import..."), btn -> {
+            fileMenuOpen = false;
+            updateMenuVisibility();
+            importCurrentFile();
+        }).bounds(leftPos + 6, topPos + MENU_BAR_HEIGHT + 2, 90, 18).build();
+        fileExportButton = Button.builder(Component.literal("Export..."), btn -> {
+            fileMenuOpen = false;
+            updateMenuVisibility();
+            exportCurrentFile();
+        }).bounds(leftPos + 6, topPos + MENU_BAR_HEIGHT + 22, 90, 18).build();
+        fileSaveButton = Button.builder(Component.literal("Save  Ctrl+S"), btn -> {
+            saveCurrentFile();
+            fileMenuOpen = false;
+            updateMenuVisibility();
+            if (currentFile != null && minecraft != null && minecraft.player != null) {
+                minecraft.player.displayClientMessage(Component.literal("Saved " + currentFile), true);
+            }
+        }).bounds(leftPos + 6, topPos + MENU_BAR_HEIGHT + 42, 90, 18).build();
+
+        editor = new CodeEditorWidget(leftPos + 142, topPos + FILE_EXPLORER_Y, editorWidth, editorHeight, "",
+                menu.blockEntity.getEditorCompletions(), this::openHelp);
+        editor.setReadOnly(true);
+        editor.setPythonMode(false);
+        editor.setCarriedSupplier(menu::getCarried);
         addRenderableWidget(editor);
         setInitialFocus(editor);
 
-        var lvl = menu.blockEntity.getLevel();
-        editor.setFoldKey((lvl != null ? lvl.dimension().location().toString() : "?")
-                + "@" + menu.blockEntity.getBlockPos().asLong());
+        fileExplorer = new FileExplorerWidget(leftPos + FILE_EXPLORER_X, topPos + FILE_EXPLORER_Y,
+                FILE_EXPLORER_WIDTH, fileExplorerHeight, menu.blockEntity.getBlockPos(),
+                this::onExplorerOpen, this::onExplorerRenamed);
+        addRenderableWidget(fileExplorer);
 
-        int buttonY = topPos + 210;
+        // Add dropdown controls last so they render above the editor and explorer.
+        addRenderableWidget(fileImportButton);
+        addRenderableWidget(fileExportButton);
+        addRenderableWidget(fileSaveButton);
+        addRenderableWidget(boardNameBox);
+        addRenderableWidget(runStateButton);
+        addRenderableWidget(restartButton);
+        updateMenuVisibility();
 
-        addRenderableWidget(Button.builder(
-                Component.literal(menu.blockEntity.isRunning() ? "Running!" : "Paused!"),
-                btn -> {
-                    boolean newState = !menu.blockEntity.isRunning();
-                    PacketDistributor.sendToServer(new BoardComputerControlPayload(
-                            menu.blockEntity.getBlockPos(),
-                            newState ? BoardComputerControlPayload.Action.PLAY : BoardComputerControlPayload.Action.PAUSE,
-                            ""
-                    ));
-                    btn.setMessage(Component.literal(newState ? "Running!" : "Paused!"));
-                }
-        ).bounds(leftPos + 8, buttonY, 48, 20).build());
+        // Reopen the computer\'s program file (or the file that was open before a resize).
+        String start = resumeFile != null ? resumeFile : menu.blockEntity.getProgramPath();
+        resumeFile = null;
 
-        addRenderableWidget(Button.builder(
-                Component.literal("Restart"),
-                btn -> PacketDistributor.sendToServer(new BoardComputerControlPayload(
-                        menu.blockEntity.getBlockPos(),
-                        BoardComputerControlPayload.Action.RESTART,
-                        ""
-                ))
-        ).bounds(leftPos + 58, buttonY, 50, 20).build());
+        fileExplorer.visible = true;
+        fileExplorer.active = true;
+        fileExplorer.refresh();
 
-        addRenderableWidget(
-                Button.builder(
-                        Component.literal("?"),
-                        btn -> {
-                            openHelp("help.aero.basics.text");
-                        }
-                ).bounds(leftPos + 110, buttonY, 20, 20).build()
-        );
+        if (!start.isEmpty()) {
+            requestOpen(start);
+        }
 
-        addRenderableWidget(Button.builder(Component.literal("\uD83D\uDCBE"),btn -> {
-            try (MemoryStack stack = MemoryStack.stackPush()) {
-                PointerBuffer filters = stack.mallocPointer(1);
-                filters.put(MemoryUtil.memAddress(stack.UTF8("*.txt")));
-                filters.flip();
-                String data = saveData();
-                String filePath = TinyFileDialogs.tinyfd_saveFileDialog(
-                        "Save My Data",
-                        "code.txt",
-                        filters,
-                        "Text files" );
-                if (filePath == null) { return; }
-                try { Files.writeString( Paths.get(filePath),data);
-                    System.out.println("Saved to: " + filePath); }
-                catch (IOException e) { e.printStackTrace();}}}
-        ).bounds(leftPos + 132, buttonY, 20, 20).build());
-
-        addRenderableWidget(Button.builder(Component.literal("\uD83D\uDCC1"),btn -> {
-            try (MemoryStack stack = MemoryStack.stackPush()) {
-                PointerBuffer filters = stack.mallocPointer(1);
-                filters.put(MemoryUtil.memAddress(stack.UTF8("*.txt")));
-                filters.flip();
-                String filePath = TinyFileDialogs.tinyfd_openFileDialog(
-                        "Load My Data",
-                        "",
-                        filters,
-                        "Text files",
-                        false );
-                if (filePath == null) { return; }
-                try { String data = Files.readString( Paths.get(filePath) );
-                    System.out.println("Loaded: " + data);
-                    loadData(data); }
-                catch (IOException e) { e.printStackTrace(); } } }
-        ).bounds(leftPos + 154, buttonY, 20, 20).build() );
-
-
-        int tabX = leftPos + 8;
-        int tabY = topPos + 20;
-
-        tabMemoryButton = addRenderableWidget(Button.builder(
-                Component.literal("Memory"), btn -> switchTab(Tab.MEMORY)
-        ).bounds(tabX, tabY, 55, 20).build());
-
-        tabInputButton = addRenderableWidget(Button.builder(
-                Component.literal("RL In"), btn -> switchTab(Tab.RL_INPUT)
-        ).bounds(tabX + 57, tabY, 55, 20).build());
-
-        tabOutputButton = addRenderableWidget(Button.builder(
-                Component.literal("RL Out"), btn -> switchTab(Tab.RL_OUTPUT)
-        ).bounds(tabX + 114, tabY, 55, 20).build());
-
-        switchTab(Tab.MEMORY);
-
-        lastInputChannelCount = menu.blockEntity.getInputChannels().size();
-        lastOutputChannelCount = menu.blockEntity.getOutputChannels().size();
     }
 
-    private void openHelp(String translationKey) {
+    private void updateMenuVisibility() {
+        if (fileImportButton != null) { fileImportButton.visible = fileMenuOpen; fileImportButton.active = fileMenuOpen; }
+        if (fileExportButton != null) { fileExportButton.visible = fileMenuOpen; fileExportButton.active = fileMenuOpen; }
+        if (fileSaveButton != null) { fileSaveButton.visible = fileMenuOpen; fileSaveButton.active = fileMenuOpen; }
+        if (boardNameBox != null) { boardNameBox.visible = editMenuOpen; boardNameBox.active = editMenuOpen; }
+        if (runStateButton != null) { runStateButton.visible = editMenuOpen; runStateButton.active = editMenuOpen; }
+        if (restartButton != null) { restartButton.visible = editMenuOpen; restartButton.active = editMenuOpen; }
+    }
 
+    private void importCurrentFile() {
+        if (currentFile == null) {
+            if (minecraft != null && minecraft.player != null) minecraft.player.displayClientMessage(
+                    Component.literal("Open a file before importing."), true);
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer filters = stack.mallocPointer(1);
+            filters.put(MemoryUtil.memAddress(stack.UTF8("*.txt;*.py"))).flip();
+            String path = TinyFileDialogs.tinyfd_openFileDialog("Import into current file", "", filters,
+                    "Text/Python files", false);
+            if (path != null) loadData(Files.readString(Paths.get(path)));
+        } catch (IOException e) { e.printStackTrace(); }
+    }
+
+    private void exportCurrentFile() {
+        if (currentFile == null) {
+            if (minecraft != null && minecraft.player != null) minecraft.player.displayClientMessage(
+                    Component.literal("Open a file before exporting."), true);
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer filters = stack.mallocPointer(1);
+            filters.put(MemoryUtil.memAddress(stack.UTF8("*.txt;*.py"))).flip();
+            String suggested = currentFile.substring(currentFile.lastIndexOf('/') + 1);
+            String path = TinyFileDialogs.tinyfd_saveFileDialog("Export current file", suggested, filters,
+                    "Text/Python files");
+            if (path != null) Files.writeString(Paths.get(path), saveData());
+        } catch (IOException e) { e.printStackTrace(); }
+    }
+
+    // =====================================================================
+    // Files: whatever is open in the editor is the computer's program
+    // =====================================================================
+
+    private static boolean isPython(String path) {
+        return path.toLowerCase(Locale.ROOT).endsWith(".py");
+    }
+
+    private void requestOpen(String path) {
+        pendingOpen = path;
+        PacketDistributor.sendToServer(new FileActionPayload(
+                menu.blockEntity.getBlockPos(), FileActionPayload.Action.READ, path, ""));
+    }
+
+    private void onExplorerOpen(@Nullable String path) {
+        if (path == null || path.equals(currentFile)) return;
+        saveCurrentFile();          // autosave the file we are leaving
+        requestOpen(path);          // the server also makes it the program
+    }
+
+    private void onExplorerRenamed(String oldPath, String newPath) {
+        if (currentFile != null
+                && (currentFile.equals(oldPath) || currentFile.startsWith(oldPath + "/"))) {
+            currentFile = newPath + currentFile.substring(oldPath.length());
+            fileExplorer.setOpenFile(currentFile);
+        }
+    }
+
+    private void applyFile(String path, String content) {
+        currentFile = path;
+        editor.setText(content);
+        editor.setPythonMode(isPython(path));      // highlighting + autocomplete only for .py
+        editor.setReadOnly(false);
+        var lvl = menu.blockEntity.getLevel();
+        editor.setFoldKey((lvl != null ? lvl.dimension().location().toString() : "?")
+                + "@" + menu.blockEntity.getBlockPos().asLong() + ":" + path);
+        fileExplorer.setOpenFile(path);
+    }
+
+    private void clearFile() {
+        currentFile = null;
+        editor.setText("");
+        editor.setPythonMode(false);
+        editor.setReadOnly(true);
+        fileExplorer.setOpenFile(null);
+    }
+
+    private void saveCurrentFile() {
+        if (currentFile == null || editor == null) return;
+        String text = editor.getText();
+        if (text.getBytes(StandardCharsets.UTF_8).length > ComputerFiles.MAX_TEXT_BYTES) {
+            if (minecraft != null && minecraft.player != null) {
+                minecraft.player.displayClientMessage(
+                        Component.literal("File too large to save (max 32 KB)"), true);
+            }
+            return;
+        }
+        PacketDistributor.sendToServer(new FileActionPayload(
+                menu.blockEntity.getBlockPos(), FileActionPayload.Action.WRITE, currentFile, text));
+    }
+
+    /** Autosave before the screen is rebuilt; init() reopens the same file. */
+    @Override
+    public void resize(Minecraft mc, int w, int h) {
+        saveCurrentFile();
+        resumeFile = currentFile;
+        super.resize(mc, w, h);
+    }
+
+    // =====================================================================
+
+    private void openHelp(String translationKey) {
         if (helpWidget != null) {
             removeWidget(helpWidget);
         }
@@ -248,462 +315,54 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
         addRenderableWidget(helpWidget);
     }
 
+    /** Imports plain text into the currently open file. */
     public void loadData(String data) {
-        AeroComputers.LOGGER.info("Load Data");
-
-        // Split into exactly 5 parts:
-        // variables
-        // inputs
-        // outputs
-        // computer name
-        // program
-        String[] dataParts = data.split(";-;-;-;-;-;-;-;-;-;", 5);
-
-        if (dataParts.length < 5) {
-            AeroComputers.LOGGER.error("Invalid save file!");
+        if (currentFile == null) {
+            AeroComputers.LOGGER.warn("Open a file before importing text.");
             return;
         }
-
-        // Variables
-        if (!dataParts[0].isBlank()) {
-            for (String variable : dataParts[0].split(",")) {
-                variable = variable.trim();
-
-                if (variable.isBlank()) {
-                    continue;
-                }
-
-                String[] parts = variable.split("=", 2);
-
-                if (parts.length != 2) {
-                    continue;
-                }
-
-                String name = parts[0].trim();
-                double value = Double.parseDouble(parts[1].trim());
-
-                PacketDistributor.sendToServer(new BoardComputerVariablePayload(
-                        menu.blockEntity.getBlockPos(),
-                        BoardComputerVariablePayload.Action.ADD,
-                        name,
-                        ""
-                ));
-
-                PacketDistributor.sendToServer(new BoardComputerVariablePayload(
-                        menu.blockEntity.getBlockPos(),
-                        BoardComputerVariablePayload.Action.SET_VALUE,
-                        name,
-                        String.valueOf(value)
-                ));
-            }
-        }
-
-        loadChannels(
-                dataParts[1],
-                BoardComputerChannelPayload.Direction.INPUT
-        );
-
-        loadChannels(
-                dataParts[2],
-                BoardComputerChannelPayload.Direction.OUTPUT
-        );
-
-        // Name
-        PacketDistributor.sendToServer(new BoardComputerControlPayload(
-                menu.blockEntity.getBlockPos(),
-                BoardComputerControlPayload.Action.NAME,
-                dataParts[3]
-        ));
-
-        // Program
-        editor.setText(dataParts[4]);
-
-        PacketDistributor.sendToServer(new BoardComputerEditPayload(
-                menu.blockEntity.getBlockPos(),
-                editor.getText()
-        ));
-
-        rebuildPanel();
+        editor.setText(data);
+        saveCurrentFile();
     }
 
+    /** Exports the currently visible editor text. */
     public String saveData() {
-        AeroComputers.LOGGER.info("Save Data");
-
-        PacketDistributor.sendToServer(
-                new BoardComputerEditPayload(
-                        menu.blockEntity.getBlockPos(),
-                        editor.getText()
-                )
-        );
-
-        String variables = menu.blockEntity.getPersistentVariablesSnapshot()
-                .entrySet()
-                .stream()
-                .map(e -> e.getKey() + "=" + e.getValue())
-                .collect(java.util.stream.Collectors.joining(","));
-
-        String inputs = saveChannels(menu.blockEntity.getInputChannels());
-        String outputs = saveChannels(menu.blockEntity.getOutputChannels());
-
-        return variables + ";-;-;-;-;-;-;-;-;-;" +
-                inputs + ";-;-;-;-;-;-;-;-;-;" +
-                outputs + ";-;-;-;-;-;-;-;-;-;" +
-                menu.blockEntity.getComputerName() + ";-;-;-;-;-;-;-;-;-;" +
-                menu.blockEntity.getProgram();
+        return currentFile != null && editor != null ? editor.getText() : "";
     }
-
-    private String saveChannels(List<BoardComputerBlockEntity.IOChannel> channels) {
-        return channels.stream()
-                .map(ch -> String.join("|",
-                        ch.variableName,
-                        ch.mode.name(),
-                        String.valueOf(ch.freqA),
-                        String.valueOf(ch.freqB)
-                ))
-                .collect(java.util.stream.Collectors.joining(";"));
-    }
-
-    private void loadChannels(String data, BoardComputerChannelPayload.Direction dir) {
-        if (data == null || data.isBlank() || data.equals("[]")) {
-            return;
-        }
-
-        // IMPORTANT:
-        // Only remove channels belonging to this direction.
-        if (dir == BoardComputerChannelPayload.Direction.INPUT) {
-            for (var channel : new ArrayList<>(menu.blockEntity.getInputChannels())) {
-                PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                        menu.blockEntity.getBlockPos(),
-                        BoardComputerChannelPayload.Direction.INPUT,
-                        BoardComputerChannelPayload.Action.REMOVE,
-                        channel.id,
-                        ""
-                ));
-            }
-        } else {
-            for (var channel : new ArrayList<>(menu.blockEntity.getOutputChannels())) {
-                PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                        menu.blockEntity.getBlockPos(),
-                        BoardComputerChannelPayload.Direction.OUTPUT,
-                        BoardComputerChannelPayload.Action.REMOVE,
-                        channel.id,
-                        ""
-                ));
-            }
-        }
-
-        // Parse the saved channels.
-        for (String c : data.split(";")) {
-            if (c.isBlank()) {
-                continue;
-            }
-
-            // Saved format:
-            // name|mode|freqA|freqB
-            String[] channel = c.split("\\|", 4);
-
-            if (channel.length != 4) {
-                AeroComputers.LOGGER.error(
-                        "Invalid channel data: '{}'",
-                        c
-                );
-                continue;
-            }
-
-            pendingChannelLoads.add(new PendingChannelLoad(
-                    dir,
-                    channel[0],
-                    channel[1],
-                    channel[2],
-                    channel[3]
-            ));
-        }
-
-        // Start creating the first channel.
-        processNextPendingChannel();
-    }
-
-    private boolean channelLoadInFlight = false;
-
-    private void processNextPendingChannel() {
-        if (pendingChannelLoads.isEmpty() || channelLoadInFlight) {
-            return;
-        }
-
-        channelLoadInFlight = true;
-        PendingChannelLoad pending = pendingChannelLoads.getFirst();
-
-        PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                menu.blockEntity.getBlockPos(),
-                pending.direction(),
-                BoardComputerChannelPayload.Action.ADD,
-                "",
-                ""
-        ));
-    }
-
-    private void switchTab(Tab tab) {
-        currentTab = tab;
-        tabMemoryButton.active = tab != Tab.MEMORY;
-        tabInputButton.active = tab != Tab.RL_INPUT;
-        tabOutputButton.active = tab != Tab.RL_OUTPUT;
-        rebuildPanel();
-    }
-
-    /** Clears and rebuilds every widget in the side panel to match current block-entity state. */
-    public void rebuildPanel() {
-        for (var w : panelWidgets) removeWidget(w);
-        panelWidgets.clear();
-
-        switch (currentTab) {
-            case MEMORY -> buildMemoryPanel();
-            case RL_INPUT -> buildChannelPanel(true);
-            case RL_OUTPUT -> buildChannelPanel(false);
-        }
-
-        updatePanelWidgetVisibility();
-    }
-
-    private <T extends net.minecraft.client.gui.components.AbstractWidget> T track(T widget) {
-        panelWidgets.add(widget);
-        return widget;
-    }
-
-    private void buildMemoryPanel() {
-        int y = PANEL_Y - scrollOffset;
-
-        for (var entry : menu.blockEntity.getPersistentVariablesSnapshot().entrySet()) {
-            String name = entry.getKey();
-
-            EditBox nameBox = track(new EditBox(font, leftPos + PANEL_X, topPos + y, 70, 14, Component.empty()));
-            nameBox.setValue(name);
-            nameBox.setResponder(newName -> {
-                if (!newName.equals(name) && !newName.isBlank()) {
-                    PacketDistributor.sendToServer(new BoardComputerVariablePayload(
-                            menu.blockEntity.getBlockPos(), BoardComputerVariablePayload.Action.RENAME, name, newName));
-                }
-            });
-            track(Button.builder(Component.literal("X"), btn -> {
-                PacketDistributor.sendToServer(new BoardComputerVariablePayload(
-                        menu.blockEntity.getBlockPos(), BoardComputerVariablePayload.Action.REMOVE, name, ""));
-                rebuildPanel();
-            }).bounds(leftPos + PANEL_X + 130, topPos + y, 16, 14).build());
-
-            y += ROW_HEIGHT;
-        }
-
-        newVarNameBox = track(new EditBox(font, leftPos + PANEL_X, topPos + y, 100, 14, Component.empty()));
-        newVarNameBox.setHint(Component.literal("new variable"));
-
-        track(Button.builder(Component.literal("+"), btn -> {
-            String name = newVarNameBox.getValue().trim();
-            if (!name.isBlank()) {
-                PacketDistributor.sendToServer(new BoardComputerVariablePayload(
-                        menu.blockEntity.getBlockPos(), BoardComputerVariablePayload.Action.ADD, name, ""));
-                rebuildPanel();
-            }
-        }).bounds(leftPos + PANEL_X + 105, topPos + y, 20, 14).build());
-    }
-
-    private void buildChannelPanel(boolean input) {
-        var channels = input ? menu.blockEntity.getInputChannels() : menu.blockEntity.getOutputChannels();
-        var dir = input ? BoardComputerChannelPayload.Direction.INPUT : BoardComputerChannelPayload.Direction.OUTPUT;
-
-        int y = PANEL_Y - scrollOffset;
-
-
-
-        for (var ch : channels) {
-            String id = ch.id;
-
-            EditBox nameBox = track(new EditBox(font, leftPos + PANEL_X, topPos + y, 60, 14, Component.empty()));
-            nameBox.setValue(ch.variableName);
-            nameBox.setResponder(newName -> {
-                if (!newName.isBlank()) {
-                    PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                            menu.blockEntity.getBlockPos(), dir, BoardComputerChannelPayload.Action.RENAME, id, newName));
-                }
-            });
-
-            track(Button.builder(Component.literal(ch.mode.name()), btn -> {
-                var newMode = ch.mode == BoardComputerBlockEntity.SignalMode.S
-                        ? BoardComputerBlockEntity.SignalMode.B
-                        : BoardComputerBlockEntity.SignalMode.S;
-                PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                        menu.blockEntity.getBlockPos(), dir, BoardComputerChannelPayload.Action.SET_MODE, id, newMode.name()));
-                rebuildPanel();
-            }).bounds(leftPos + PANEL_X + 62, topPos + y, 10, 14).build());
-
-            track(new ItemIconButton(
-                    leftPos + PANEL_X + 74,
-                    topPos + y,
-                    ch.freqA,
-                    btn -> PacketDistributor.sendToServer(
-                            new BoardComputerChannelPayload(
-                                    menu.blockEntity.getBlockPos(),
-                                    dir,
-                                    BoardComputerChannelPayload.Action.SET_FREQ_A,
-                                    id,
-                                    ""
-                            )
-                    )
-            ));
-
-            track(new ItemIconButton(
-                    leftPos + PANEL_X + 94,
-                    topPos + y,
-                    ch.freqB,
-                    btn -> PacketDistributor.sendToServer(
-                            new BoardComputerChannelPayload(
-                                    menu.blockEntity.getBlockPos(),
-                                    dir,
-                                    BoardComputerChannelPayload.Action.SET_FREQ_B,
-                                    id,
-                                    ""
-                            )
-                    )
-            ));
-
-            track(Button.builder(Component.literal("X"), btn -> {
-                PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                        menu.blockEntity.getBlockPos(), dir, BoardComputerChannelPayload.Action.REMOVE, id, ""));
-                rebuildPanel();
-            }).bounds(leftPos + PANEL_X + 115, topPos + y, 16, 14).build());
-
-            y += ROW_HEIGHT;
-        }
-
-        track(Button.builder(Component.literal("+ Channel"), btn -> {
-            PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                    menu.blockEntity.getBlockPos(),
-                    dir,
-                    BoardComputerChannelPayload.Action.ADD,
-                    "",
-                    ""
-            ));
-        }).bounds(leftPos + PANEL_X, topPos + y, 80, 14).build());
-    }
-
-    private int lastChannelUpdateId = -1;
-    private int lastInputSize = -1;
-    private int lastOutputSize = -1;
-    private int lastVariableUpdateId = -1;
 
     @Override
     public void containerTick() {
         super.containerTick();
 
-        int channelId = menu.blockEntity.getChannelUpdateId();
-        int variableId = menu.blockEntity.getVariableUpdateId();
         int completionId = menu.blockEntity.getEditorCompletionUpdateId();
-
-        int in = menu.blockEntity.getInputChannels().size();
-        int out = menu.blockEntity.getOutputChannels().size();
-
-        // Handle channel count changes and pending channel loads.
-        if (in != lastInputChannelCount || out != lastOutputChannelCount) {
-            boolean inputAdded = in > lastInputChannelCount;
-            boolean outputAdded = out > lastOutputChannelCount;
-
-            lastInputChannelCount = in;
-            lastOutputChannelCount = out;
-
-            if (!pendingChannelLoads.isEmpty()) {
-                PendingChannelLoad pending = pendingChannelLoads.getFirst();
-
-                boolean correctDirection =
-                        (pending.direction() == BoardComputerChannelPayload.Direction.INPUT && inputAdded)
-                                || (pending.direction() == BoardComputerChannelPayload.Direction.OUTPUT && outputAdded);
-
-                if (correctDirection) {
-                    var channels =
-                            pending.direction() == BoardComputerChannelPayload.Direction.INPUT
-                                    ? menu.blockEntity.getInputChannels()
-                                    : menu.blockEntity.getOutputChannels();
-
-                    if (!channels.isEmpty()) {
-                        var newChannel = channels.getLast();
-                        String id = newChannel.id;
-
-                        // Now the client actually knows the ID.
-                        PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                                menu.blockEntity.getBlockPos(),
-                                pending.direction(),
-                                BoardComputerChannelPayload.Action.RENAME,
-                                id,
-                                pending.name()
-                        ));
-
-                        PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                                menu.blockEntity.getBlockPos(),
-                                pending.direction(),
-                                BoardComputerChannelPayload.Action.SET_FREQ_A,
-                                id,
-                                pending.freqA()
-                        ));
-
-                        PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                                menu.blockEntity.getBlockPos(),
-                                pending.direction(),
-                                BoardComputerChannelPayload.Action.SET_FREQ_B,
-                                id,
-                                pending.freqB()
-                        ));
-
-                        PacketDistributor.sendToServer(new BoardComputerChannelPayload(
-                                menu.blockEntity.getBlockPos(),
-                                pending.direction(),
-                                BoardComputerChannelPayload.Action.SET_MODE,
-                                id,
-                                pending.mode()
-                        ));
-
-                        // Finished this channel.
-                        pendingChannelLoads.removeFirst();
-                        channelLoadInFlight = false;
-
-                        // Create the next one.
-                        if (!pendingChannelLoads.isEmpty()) {
-                            processNextPendingChannel();
-                        }
-                    }
-                }
-            }
-
-            // Keep your existing pendingChannelLoads handling here.
-            // Do not put the panel refresh check inside this block.
-        }
-
-        // Refresh for channel changes, frequency/mode changes,
-        // and variable changes, even when channel counts stay the same.
-        if (channelId != lastChannelUpdateId
-                || variableId != lastVariableUpdateId
-                || in != lastInputSize
-                || out != lastOutputSize) {
-
-            lastChannelUpdateId = channelId;
-            lastVariableUpdateId = variableId;
-            lastInputSize = in;
-            lastOutputSize = out;
-
-            rebuildPanel();
-        }
-
         if (completionId != lastEditorCompletionUpdateId) {
             lastEditorCompletionUpdateId = completionId;
-
             if (editor != null) {
-                editor.updateCompletions(
-                        menu.blockEntity.getEditorCompletions()
-                );
+                editor.updateCompletions(menu.blockEntity.getEditorCompletions());
+            }
+        }
+
+        // The file tree stays visible beside the editor.
+        if (fileExplorer != null) {
+            if (fileExplorer.tick() && currentFile != null && !fileExplorer.exists(currentFile)) {
+                clearFile();
+            }
+        }
+
+        if (ClientFileState.contentVersion != lastFileContentVersion) {
+            lastFileContentVersion = ClientFileState.contentVersion;
+            if (pendingOpen != null && pendingOpen.equals(ClientFileState.openPath)) {
+                String path = pendingOpen;
+                pendingOpen = null;
+                applyFile(path, ClientFileState.openContent);
             }
         }
     }
 
     @Override
     public void removed() {
-        PacketDistributor.sendToServer(new BoardComputerEditPayload(
-                menu.blockEntity.getBlockPos(), editor.getText()));
+        if (!savedOnClose) saveCurrentFile();
+        saveCurrentFile();   // autosave: the open file is written back when the GUI closes
 
         PacketDistributor.sendToServer(new BoardComputerControlPayload(
                 menu.blockEntity.getBlockPos(),
@@ -713,47 +372,88 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
         super.removed();
     }
 
-    private boolean isInPanel(double mouseX, double mouseY) {
-        return mouseX >= leftPos + PANEL_X &&
-                mouseX < leftPos + PANEL_X + PANEL_WIDTH &&
-                mouseY >= topPos + PANEL_Y &&
-                mouseY < topPos + PANEL_Y + PANEL_HEIGHT;
+    private boolean savedOnClose = false;
+
+    @Override
+    public void onClose() {
+        saveCurrentFile();        // muss VOR super.onClose() passieren, das schickt das Close-Paket
+        savedOnClose = true;
+        super.onClose();
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (helpWidget != null && helpWidget.visible) {
-            if (helpWidget.mouseClicked(mouseX, mouseY, button)) {
-                return true;
+        if (helpWidget != null && helpWidget.visible
+                && helpWidget.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
+
+        // Dispatch dropdown clicks first. Drawing controls on top does not change
+        // Minecraft's normal widget hit-testing order, so consume these clicks here.
+        if (fileMenuOpen) {
+            int x = leftPos + 4;
+            int y = topPos + MENU_BAR_HEIGHT;
+            int w = 104;
+            int h = 62;
+            if (mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h) {
+                if (fileImportButton.mouseClicked(mouseX, mouseY, button)) return true;
+                if (fileExportButton.mouseClicked(mouseX, mouseY, button)) return true;
+                if (fileSaveButton.mouseClicked(mouseX, mouseY, button)) return true;
+                return true; // consume clicks on the empty menu background
             }
+        }
+
+        if (editMenuOpen) {
+            int x = leftPos + 48;
+            int y = topPos + MENU_BAR_HEIGHT;
+            int w = 138;
+            int h = 48;
+            if (mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h) {
+                if (boardNameBox.mouseClicked(mouseX, mouseY, button)) {
+                    setFocused(boardNameBox);
+                    return true;
+                }
+                if (runStateButton.mouseClicked(mouseX, mouseY, button)) return true;
+                if (restartButton.mouseClicked(mouseX, mouseY, button)) return true;
+                return true; // do not let clicks reach the editor/explorer below
+            }
+        }
+
+        // Clicking outside the dropdown closes it, then normal widget handling runs.
+        boolean onMenuBar = mouseY >= topPos && mouseY <= topPos + MENU_BAR_HEIGHT;
+        if ((fileMenuOpen || editMenuOpen) && !onMenuBar) {
+            fileMenuOpen = false;
+            editMenuOpen = false;
+            updateMenuVisibility();
         }
 
         boolean result = super.mouseClicked(mouseX, mouseY, button);
-
-        if (isInPanel(mouseX, mouseY)) {
-            for (var widget : panelWidgets) {
-                if (widget.mouseClicked(mouseX, mouseY, button)) {
-                    setFocused(widget);
-                    return true;
-                }
-            }
-        }
-
-        if (editor != null &&
-                !(mouseX >= editor.getX() && mouseX <= editor.getX() + editor.getWidth()
-                        && mouseY >= editor.getY() && mouseY <= editor.getY() + editor.getHeight())) {
+        if (editor != null && !(mouseX >= editor.getX() && mouseX <= editor.getX() + editor.getWidth()
+                && mouseY >= editor.getY() && mouseY <= editor.getY() + editor.getHeight())) {
             editor.setFocused(false);
         }
-
         return result;
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
 
+        if (keyCode == 256 && fileExplorer != null && fileExplorer.isPrompting()) {
+            fileExplorer.cancelPrompt();
+            return true;
+        }
+
+        if (keyCode == 83 && hasControlDown() && currentFile != null) {
+            saveCurrentFile();
+            if (minecraft != null && minecraft.player != null) {
+                minecraft.player.displayClientMessage(Component.literal("Saved " + currentFile), true);
+            }
+            return true;
+        }
+
         if (keyCode == 256 && editor != null && editor.isAutocompleteOpen()) {
             editor.closeAutocomplete();
-            return true; // consumed — don't let Screen's default Escape-closes-GUI logic run
+            return true;
         }
 
         if (keyCode == 256 && helpWidget != null) {
@@ -762,18 +462,16 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
             return true;
         }
 
-        for (var widget : panelWidgets) {
-            if (widget.isFocused() && widget.keyPressed(keyCode, scanCode, modifiers))
-                return true;
-        }
 
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
-
-
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (fileExplorer != null && fileExplorer.visible
+                && fileExplorer.mouseDragged(mouseX, mouseY, button, dragX, dragY)) {
+            return true;
+        }
         if (editor != null && editor.isFocused()) {
             if (editor.mouseDragged(mouseX, mouseY, button, dragX, dragY)) {
                 return true;
@@ -782,80 +480,52 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
-    private int getPanelRowCount() {
-        return switch (currentTab) {
-            case MEMORY ->
-                    menu.blockEntity.getPersistentVariablesSnapshot().size() + 1;
-
-            case RL_INPUT ->
-                    menu.blockEntity.getInputChannels().size() + 1;
-
-            case RL_OUTPUT ->
-                    menu.blockEntity.getOutputChannels().size() + 1;
-        };
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        boolean handled = fileExplorer != null && fileExplorer.mouseReleased(mouseX, mouseY, button);
+        return super.mouseReleased(mouseX, mouseY, button) || handled;
     }
 
     @Override
-    public boolean mouseScrolled(
-            double mouseX,
-            double mouseY,
-            double scrollX,
-            double scrollY
-    ) {
-        // Help popup gets scroll priority.
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         if (helpWidget != null && helpWidget.visible
                 && helpWidget.isMouseOver(mouseX, mouseY)) {
-
-            return helpWidget.mouseScrolled(
-                    mouseX,
-                    mouseY,
-                    scrollX,
-                    scrollY
-            );
+            return helpWidget.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
         }
 
-        // Normal panel scrolling
-        if (mouseX >= leftPos + PANEL_X &&
-                mouseX <= leftPos + PANEL_X + PANEL_WIDTH &&
-                mouseY >= topPos + PANEL_Y &&
-                mouseY <= topPos + PANEL_Y + PANEL_HEIGHT) {
-
-            int maxScroll = Math.max(
-                    0,
-                    getPanelRowCount() * ROW_HEIGHT - PANEL_HEIGHT
-            );
-
-            scrollOffset -= (int)(scrollY * ROW_HEIGHT);
-            scrollOffset = Mth.clamp(scrollOffset, 0, maxScroll);
-
-            rebuildPanel();
-            return true;
+        if (fileExplorer != null && fileExplorer.visible
+                && fileExplorer.isMouseOver(mouseX, mouseY)) {
+            return fileExplorer.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
         }
+
 
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
     protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
-        RenderSystem.setShader(GameRenderer::getPositionTexShader);
-        RenderSystem.setShaderColor(1, 1, 1, 1);
-        RenderSystem.setShaderTexture(0, GUI_TEXTURE);
-        int x = (width - imageWidth) / 2;
-        int y = (height - imageHeight) / 2;
-        guiGraphics.blit(GUI_TEXTURE, x, y, 0, 0, imageWidth, imageHeight, 468, 329);
+        guiGraphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xFF1E1E1E);
+        guiGraphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + MENU_BAR_HEIGHT, 0xFF252526);
+        guiGraphics.fill(leftPos + FILE_EXPLORER_X - 2, topPos + FILE_EXPLORER_Y - 2,
+                leftPos + FILE_EXPLORER_X + FILE_EXPLORER_WIDTH + 2,
+                topPos + FILE_EXPLORER_Y + fileExplorerHeight + 2, 0xFF252526);
+        guiGraphics.fill(leftPos + 138, topPos + FILE_EXPLORER_Y - 2,
+                leftPos + 139, topPos + FILE_EXPLORER_Y + fileExplorerHeight + 2, 0xFF3C3C3C);
     }
 
-    private void updatePanelWidgetVisibility() {
-        int top = topPos + PANEL_Y;
-        int bottom = top + PANEL_HEIGHT;
+    private void syncPopupSlots() {
+        int[] o = editor == null ? null : editor.freqInventoryOrigin();
 
-        for (var widget : panelWidgets) {
-            boolean visible =
-                    widget.getY() + widget.getHeight() > top &&
-                            widget.getY() < bottom;
-
-            widget.visible = visible;
-            widget.active = visible;
+        for (int i = 0; i < menu.popupSlots.size(); i++) {
+            PopupSlot s = menu.popupSlots.get(i);
+            if (o == null) {
+                s.setEnabled(false);
+                continue;
+            }
+            int col = i < 27 ? i % 9 : i - 27;
+            int y = i < 27 ? o[1] + (i / 9) * 18 : o[1] + 58;     // hotbar sits 4px below the main rows
+            s.moveTo(o[0] + col * 18 + 1 - leftPos, y + 1 - topPos);
+            s.setEnabled(true);
         }
     }
 
@@ -866,32 +536,119 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
             int mouseY,
             float partialTick
     ) {
+        syncPopupSlots();
         renderBackground(graphics, mouseX, mouseY, partialTick);
 
-        // Draw GUI and all normal widgets
         super.render(graphics, mouseX, mouseY, partialTick);
 
-        // Clip panel
-        graphics.enableScissor(
-                leftPos + PANEL_X,
-                topPos + PANEL_Y,
-                leftPos + PANEL_X + PANEL_WIDTH,
-                topPos + PANEL_Y + PANEL_HEIGHT
-        );
+        // Draw dropdowns above all underlying widgets and captions.
+        renderDropdownOverlays(graphics, mouseX, mouseY, partialTick);
 
-        // Panel widgets are rendered again here
-        for (var widget : panelWidgets) {
-            widget.render(graphics, mouseX, mouseY, partialTick);
+        // Draw captions only after the dropdown overlay, and only when
+        // they are outside the open dropdown area.
+        boolean dropdownOpen = fileMenuOpen || editMenuOpen;
+
+        String label;
+        int labelColor = 0xFFAAAAAA;
+
+        if (currentFile == null) {
+            label = "No file open - select a file";
+        } else if (isPython(currentFile)) {
+            label = currentFile + "  (running this file)";
+        } else {
+            label = currentFile + "  (not a .py file - will not run)";
+            labelColor = 0xFFDDAA55;
         }
 
-        graphics.disableScissor();
+        int captionY = topPos + 25;
 
-        // IMPORTANT:
-        // Render the help popup LAST so it is visually on top
+        // The captions are below the menu bar. Avoid drawing them over
+        // an open dropdown if their horizontal area intersects it.
+        if (!dropdownOpen) {
+            graphics.drawString(
+                    font, label,
+                    leftPos + 142, captionY,
+                    labelColor, false
+            );
+
+            graphics.drawString(
+                    font, "EXPLORER",
+                    leftPos + 12, captionY,
+                    0xFFBBBBBB, false
+            );
+        }
+
         if (helpWidget != null && helpWidget.visible) {
             helpWidget.render(graphics, mouseX, mouseY, partialTick);
         }
 
         renderTooltip(graphics, mouseX, mouseY);
+    }
+
+    private void renderDropdownOverlays(
+            GuiGraphics graphics,
+            int mouseX,
+            int mouseY,
+            float partialTick
+    ) {
+        graphics.flush();
+
+        graphics.pose().pushPose();
+        graphics.pose().translate(0.0F, 0.0F, 2000.0F);
+
+        if (fileMenuOpen) {
+            int x = leftPos + 4;
+            int y = topPos + MENU_BAR_HEIGHT;
+            int menuWidth = 104;
+            int menuHeight = 62;
+
+            graphics.fill(
+                    x, y, x + menuWidth, y + menuHeight,
+                    0xFF252526
+            );
+            graphics.renderOutline(
+                    x, y, menuWidth, menuHeight,
+                    0xFF454545
+            );
+
+            if (fileImportButton != null) {
+                fileImportButton.render(graphics, mouseX, mouseY, partialTick);
+            }
+            if (fileExportButton != null) {
+                fileExportButton.render(graphics, mouseX, mouseY, partialTick);
+            }
+            if (fileSaveButton != null) {
+                fileSaveButton.render(graphics, mouseX, mouseY, partialTick);
+            }
+        }
+
+        if (editMenuOpen) {
+            int x = leftPos + 48;
+            int y = topPos + MENU_BAR_HEIGHT;
+            int menuWidth = 138;
+            int menuHeight = 48;
+
+            graphics.fill(
+                    x, y, x + menuWidth, y + menuHeight,
+                    0xFF252526
+            );
+            graphics.renderOutline(
+                    x, y, menuWidth, menuHeight,
+                    0xFF454545
+            );
+
+            if (boardNameBox != null) {
+                boardNameBox.render(graphics, mouseX, mouseY, partialTick);
+            }
+            if (runStateButton != null) {
+                runStateButton.render(graphics, mouseX, mouseY, partialTick);
+            }
+            if (restartButton != null) {
+                restartButton.render(graphics, mouseX, mouseY, partialTick);
+            }
+        }
+
+        graphics.flush();
+        graphics.pose().popPose();
     }
 }

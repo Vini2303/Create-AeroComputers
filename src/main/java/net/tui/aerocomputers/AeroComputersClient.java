@@ -15,9 +15,7 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.*;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
-import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
-import net.tui.aerocomputers.block.entity.ModBlockEntitys;
-import net.tui.aerocomputers.block.entity.SensorBlockEntity;
+import net.tui.aerocomputers.block.entity.*;
 import net.tui.aerocomputers.client.CameraFeed;
 import net.tui.aerocomputers.client.HudOverlay;
 import net.tui.aerocomputers.renderer.*;
@@ -51,12 +49,16 @@ public class AeroComputersClient {
         event.register(ModMenuTypes.HUD_MENU.get(), HudScreen::new);
         event.register(ModMenuTypes.WEAPONLINKER_MENU.get(), WeaponLinkerScreen::new);
         event.register(ModMenuTypes.SENSOR_MENU.get(), SensorScreen::new);
+        event.register(ModMenuTypes.DIGITALTRANSMISSION_MENU.get(), DigitalTransmissionScreen::new);
+        event.register(ModMenuTypes.CAMERA_MENU.get(), CameraScreen::new);
     }
 
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(ModBlockEntitys.BOARDCOMPUTER_BE.get(), BoardComputerRenderer::new);
         event.registerBlockEntityRenderer(ModBlockEntitys.SENSOR_BE.get(), SensorRenderer::new);
+        event.registerBlockEntityRenderer(ModBlockEntitys.DIGITALTRASMISSION_BE.get(), DigitalTransmissionRenderer::new);
+        event.registerBlockEntityRenderer(ModBlockEntitys.CAMERA_BE.get(), CameraRenderer::new);
 
         event.registerBlockEntityRenderer(ModBlockEntitys.HUDDISPLAY_BE.get(), HudDisplayRenderer::new);
     }
@@ -93,6 +95,30 @@ public class AeroComputersClient {
 
             @Override
             public boolean skipVanillaRender(SensorBlockEntity blockEntity) {
+                return !CameraFeed.isCameraLevel(blockEntity.getLevel());
+            }
+        });
+
+        VisualizerRegistry.setVisualizer(ModBlockEntitys.DIGITALTRASMISSION_BE.get(), new BlockEntityVisualizer<DigitalTransmissionBlockEntity>() {
+            @Override
+            public BlockEntityVisual<? super DigitalTransmissionBlockEntity> createVisual(VisualizationContext ctx, DigitalTransmissionBlockEntity blockEntity, float partialTick) {
+                return new DigitalTransmissionVisual(ctx, blockEntity, partialTick);
+            }
+
+            @Override
+            public boolean skipVanillaRender(DigitalTransmissionBlockEntity blockEntity) {
+                return !CameraFeed.isCameraLevel(blockEntity.getLevel());
+            }
+        });
+
+        VisualizerRegistry.setVisualizer(ModBlockEntitys.CAMERA_BE.get(), new BlockEntityVisualizer<CameraBlockEntity>() {
+            @Override
+            public BlockEntityVisual<? super CameraBlockEntity> createVisual(VisualizationContext ctx, CameraBlockEntity blockEntity, float partialTick) {
+                return new CameraVisual(ctx, blockEntity, partialTick);
+            }
+
+            @Override
+            public boolean skipVanillaRender(CameraBlockEntity blockEntity) {
                 return !CameraFeed.isCameraLevel(blockEntity.getLevel());
             }
         });

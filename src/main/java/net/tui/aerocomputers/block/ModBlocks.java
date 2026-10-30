@@ -1,5 +1,6 @@
 package net.tui.aerocomputers.block;
 
+import com.simibubi.create.content.kinetics.simpleRelays.BracketedKineticBlockEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
@@ -9,10 +10,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import net.tui.aerocomputers.AeroComputers;
-import net.tui.aerocomputers.block.custom.BoardComputerBlock;
-import net.tui.aerocomputers.block.custom.HudDisplayBlock;
-import net.tui.aerocomputers.block.custom.SensorBlock;
-import net.tui.aerocomputers.block.custom.WeaponLinkerBlock;
+import net.tui.aerocomputers.block.custom.*;
 import net.tui.aerocomputers.item.ModItems;
 
 import java.util.function.Supplier;
@@ -40,6 +38,15 @@ public class ModBlocks {
 
     public static final DeferredBlock<Block> TRANSFORMIUMORE = registerBlock("transformium_ore",
             () -> new Block(BlockBehaviour.Properties.of().strength(2).sound(SoundType.STONE).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<Block> CALCITE_CASING = registerBlock("calcite_casing",
+            () -> new Block(BlockBehaviour.Properties.of().strength(1).sound(SoundType.WOOD)));
+
+    public static final DeferredBlock<Block> DIGITALTRANSMISSIONBLOCK = registerBlock("digital_transmission",
+            () -> new DigitalTransmissionBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
+
+    public static final DeferredBlock<Block> CAMERABLOCK = registerBlock("camera",
+            () -> new CameraBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
 
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {

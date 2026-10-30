@@ -29,6 +29,14 @@ public class ModBlockEntitys {
             BLOCK_ENTITYS.register("sensor_be", () -> BlockEntityType.Builder.of(
                     SensorBlockEntity::new, ModBlocks.SENSORBLOCK.get()).build(null));
 
+    public static final Supplier<BlockEntityType<DigitalTransmissionBlockEntity>> DIGITALTRASMISSION_BE =
+            BLOCK_ENTITYS.register("digital_transmission_be", () -> BlockEntityType.Builder.of(
+                    DigitalTransmissionBlockEntity::new, ModBlocks.DIGITALTRANSMISSIONBLOCK.get()).build(null));
+
+    public static final Supplier<BlockEntityType<CameraBlockEntity>> CAMERA_BE =
+            BLOCK_ENTITYS.register("camera_be", () -> BlockEntityType.Builder.of(
+                    CameraBlockEntity::new, ModBlocks.CAMERABLOCK.get()).build(null));
+
 
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITYS.register(eventBus);

@@ -46,14 +46,14 @@ public abstract class CreativeModeTabMixin {
         addItem(items, searchItems, ModItems.HUD_HELMET.get());
         addItem(items, searchItems, ModBlocks.HUDDISPLAY.asItem());
         addItem(items, searchItems, ModBlocks.WEAPONLINKER.asItem());
+        addItem(items, searchItems, ModBlocks.SENSORBLOCK.asItem());
+        addItem(items, searchItems, ModBlocks.DIGITALTRANSMISSIONBLOCK.asItem());
+        addItem(items, searchItems, ModBlocks.CAMERABLOCK.asItem());
 
         // Pad the current section to a row boundary, then reserve a banner row.
         padToNextRow(items);
         addEmptyRow(items);
 
-        addEmptyRow(items);
-        addEmptyRow(items);
-        addEmptyRow(items);
         addEmptyRow(items);
 
         // Banner 2: Transformium / resources
@@ -61,6 +61,14 @@ public abstract class CreativeModeTabMixin {
         addItem(items, searchItems, ModBlocks.TRANSFORMIUMORE.asItem());
         addItem(items, searchItems, ModItems.RAW_TRANSFORMIUM.get());
         addItem(items, searchItems, ModItems.TRANSFORMIUM_INGOT.get());
+
+        padToNextRow(items);
+        addEmptyRow(items);
+
+        addItem(items, searchItems, ModBlocks.CALCITE_CASING.asItem());
+        addItem(items, searchItems, ModItems.CALCITE_ALLOY.asItem());
+        addItem(items, searchItems, ModItems.CALCITE_POWDER.asItem());
+        addItem(items, searchItems, ModItems.COMPUTING_MECHANISM.asItem());
 
         this.displayItems = items;
         this.displayItemsSearchTab = searchItems;

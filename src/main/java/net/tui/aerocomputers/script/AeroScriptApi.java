@@ -26,6 +26,10 @@ public final class AeroScriptApi {
         members.put("send", call(args -> computer.scriptSend(stringArg(args, 0), stringArg(args, 1))));
         members.put("read", call(args -> computer.scriptRead()));
         members.put("clear", call(args -> computer.scriptClear()));
+        members.put("getPower", call(args -> computer.scriptGetPower(stringArrayArg(args, 0))));
+        members.put("setPower", call(args -> computer.scriptSetPower(stringArrayArg(args, 0), args.size() > 1 ? args.get(1) : 0)));
+        members.put("setSpeed", call(args -> computer.scriptSetSpeed(stringArrayArg(args, 0), args.size() > 1 ? args.get(1) : 0)));
+
         Map<String, Object> bigc = new LinkedHashMap<>();
         bigc.put("aimangel", call(args -> computer.scriptCommand("bigc.aimangel", args)));
         bigc.put("fire", call(args -> computer.scriptCommand("bigc.fire", args)));

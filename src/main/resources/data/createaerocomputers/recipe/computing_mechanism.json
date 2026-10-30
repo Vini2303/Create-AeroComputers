@@ -1,0 +1,82 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": {
+    "item": "create:brass_sheet"
+  },
+  "loops": 5,
+  "results": [
+    {
+      "chance": 120.0,
+      "id": "createaerocomputers:computing_mechanism"
+    },
+    {
+      "chance": 10.0,
+      "id": "create:brass_sheet"
+    },
+    {
+      "chance": 10.0,
+      "id": "createaerocomputers:calcite_alloy"
+    },
+    {
+      "chance": 7.0,
+      "id": "minecraft:redstone"
+    },
+    {
+      "chance": 3.0,
+      "id": "create:precision_mechanism"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        {
+          "item": "createaerocomputers:incomplete_computing_mechanism"
+        },
+        {
+          "item": "create:copper_nugget"
+        }
+      ],
+      "results": [
+        {
+          "id": "createaerocomputers:incomplete_computing_mechanism"
+        }
+      ]
+    },
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        {
+          "item": "createaerocomputers:incomplete_computing_mechanism"
+        },
+        {
+          "item": "createaerocomputers:calcite_alloy"
+        }
+      ],
+      "results": [
+        {
+          "id": "createaerocomputers:incomplete_computing_mechanism"
+        }
+      ]
+    },
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        {
+          "item": "createaerocomputers:incomplete_computing_mechanism"
+        },
+        {
+          "item": "minecraft:redstone"
+        }
+      ],
+      "results": [
+        {
+          "id": "createaerocomputers:incomplete_computing_mechanism"
+        }
+      ]
+    }
+  ],
+  "transitional_item": {
+    "id": "createaerocomputers:incomplete_computing_mechanism"
+  }
+}

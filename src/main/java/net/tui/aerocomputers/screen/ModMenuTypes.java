@@ -30,6 +30,12 @@ public class ModMenuTypes {
     public static final DeferredHolder<MenuType<?>, MenuType<SensorMenu>> SENSOR_MENU =
             registerMenuType("sensor_menu", SensorMenu::new);
 
+    public static final DeferredHolder<MenuType<?>, MenuType<DigitalTransmissionMenu>> DIGITALTRANSMISSION_MENU =
+            registerMenuType("digital_transmission_menu", DigitalTransmissionMenu::new);
+
+    public static final DeferredHolder<MenuType<?>, MenuType<CameraMenu>> CAMERA_MENU =
+            registerMenuType("camera_menu", CameraMenu::new);
+
     private static <T extends AbstractContainerMenu>DeferredHolder<MenuType<?>, MenuType<T>> registerMenuType(String name, IContainerFactory<T> factory) {
         return MENUS.register(name, () -> IMenuTypeExtension.create(factory));
     }

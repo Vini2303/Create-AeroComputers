@@ -1,0 +1,16 @@
+{
+  "type": "create:item_application",
+  "ingredients": [
+    {
+      "tag": "c:stripped_logs"
+    },
+    {
+      "item": "createaerocomputers:calcite_alloy"
+    }
+  ],
+  "results": [
+    {
+      "id": "createaerocomputers:calcite_casing"
+    }
+  ]
+}

@@ -17,29 +17,10 @@ public class ModNetworking {
                 AeroComputers.MOD_ID
         );
 
-
-        registrar.playToServer(
-                BoardComputerEditPayload.TYPE,
-                BoardComputerEditPayload.STREAM_CODEC,
-                BoardComputerEditPayload::handle
-        );
-
         registrar.playToServer(
                 BoardComputerControlPayload.TYPE,
                 BoardComputerControlPayload.STREAM_CODEC,
                 BoardComputerControlPayload::handle
-        );
-
-        registrar.playToServer(
-                BoardComputerChannelPayload.TYPE,
-                BoardComputerChannelPayload.STREAM_CODEC,
-                BoardComputerChannelPayload::handle
-        );
-
-        registrar.playToServer(
-                BoardComputerVariablePayload.TYPE,
-                BoardComputerVariablePayload.STREAM_CODEC,
-                BoardComputerVariablePayload::handle
         );
 
         registrar.playToServer(
@@ -66,6 +47,18 @@ public class ModNetworking {
                 SensorEntryPayload::handle
         );
 
+        registrar.playToServer(
+                CameraEntryPayload.TYPE,
+                CameraEntryPayload.STREAM_CODEC,
+                CameraEntryPayload::handle
+        );
+
+        registrar.playToServer(
+                DigitalTransmissionEntryPayload.TYPE,
+                DigitalTransmissionEntryPayload.STREAM_CODEC,
+                DigitalTransmissionEntryPayload::handle
+        );
+
         registrar.playToClient(
                 CameraChunkPayload.TYPE,
                 CameraChunkPayload.STREAM_CODEC,
@@ -82,6 +75,10 @@ public class ModNetworking {
                 CameraBlocksPayload.STREAM_CODEC,
                 ClientPayloads::handleCameraBlocks
         );
+
+        registrar.playToServer(FileActionPayload.TYPE, FileActionPayload.STREAM_CODEC, FileActionPayload::handle);
+        registrar.playToClient(FileTreePayload.TYPE, FileTreePayload.STREAM_CODEC, FileTreePayload::handle);
+        registrar.playToClient(FileContentPayload.TYPE, FileContentPayload.STREAM_CODEC, FileContentPayload::handle);
 
     }
 

@@ -1,0 +1,14 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    {
+      "item": "minecraft:calcite"
+    }
+  ],
+  "processing_time": 250,
+  "results": [
+    {
+      "id": "createaerocomputers:calcite_powder"
+    }
+  ]
+}

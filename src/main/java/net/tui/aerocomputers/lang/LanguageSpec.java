@@ -94,7 +94,7 @@ public final class LanguageSpec {
     /** module -> function name -> parameter names  ("name:p1,p2") */
     public static final Map<String, Map<String, List<String>>> FUNCTION_MODULES = Map.ofEntries(
             // ---- mod API ----
-            Map.entry("aero", fns("getPos:sensor_freq", "getRot:sensor_freq", "getVel:sensor_freq", "radar:sensor_freq", "send:name_id,message", "read", "clear")),
+            Map.entry("aero", fns("getPos:sensor_freq", "getRot:sensor_freq", "getVel:sensor_freq", "radar:sensor_freq", "send:name_id,message", "getPower:link_freq", "setPower:link_freq,power", "setSpeed:freq,speed", "read", "clear")),
             Map.entry("bigc", fns("aimangel:pitch,yaw", "fire:rate", "aimpos:pos")),
             Map.entry("slrw", fns("firechin:fire", "aimchinangel:pitch,yaw", "aimchinpos:pos")),
 
@@ -208,6 +208,8 @@ public final class LanguageSpec {
 
     /** function, class and constant names inside a module, sorted (empty for modules the catalog doesn't know) */
     public static List<String> moduleMembers(String module) {
+        if (LocalModules.has(module) && !FUNCTION_MODULES.containsKey(module)) return LocalModules.members(module);
+
         Set<String> members = new TreeSet<>();
 
         Map<String, List<String>> fns = FUNCTION_MODULES.get(module);
@@ -220,6 +222,12 @@ public final class LanguageSpec {
         if (consts != null) members.addAll(consts);
 
         return List.copyOf(members);
+    }
+
+    public static List<String> importableNames() {
+        Set<String> s = new TreeSet<>(IMPORTABLE_MODULES);
+        s.addAll(LocalModules.names());
+        return List.copyOf(s);
     }
 
     /** fields of a native object (hud.Label ...): constructor parameters + remove() */

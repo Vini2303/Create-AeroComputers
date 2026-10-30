@@ -26,8 +26,11 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.tui.aerocomputers.AeroComputers;
+import net.tui.aerocomputers.registries.DigitalTransmissionRegistry;
 import net.tui.aerocomputers.registries.HudRegistry;
 import net.tui.aerocomputers.registries.SensorRegistry;
 import net.tui.aerocomputers.screen.custom.BoardComputerMenu;
@@ -35,6 +38,7 @@ import net.tui.aerocomputers.script.AeroScriptApi;
 import net.tui.aerocomputers.script.HudScriptApi;
 import net.tui.aerocomputers.script.PythonScriptRuntime;
 import net.tui.aerocomputers.network.CameraChunkManager;
+import net.tui.aerocomputers.script.SandboxFileSystem;
 import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaterniond;
@@ -45,7 +49,180 @@ import java.util.*;
 
 public class BoardComputerBlockEntity extends KineticBlockEntity implements MenuProvider, BlockEntitySubLevelActor {
 
+    private String programPath = "";   // relativ zum Welt-Ordner, z. B. "main.py"
 
+    private record FrequencyPair(String first, String second) {}
+
+    private final Map<FrequencyPair, Integer> powerInputs = new LinkedHashMap<>();
+    private final Map<FrequencyPair, Integer> powerOutputs = new LinkedHashMap<>();
+
+    private final Map<Integer, FrequencyPair> inputSlotPairs = new HashMap<>();
+    private final Map<Integer, FrequencyPair> outputSlotPairs = new HashMap<>();
+
+    private final Map<FrequencyPair, Integer> receivedPowers = new HashMap<>();
+    private final Map<FrequencyPair, Integer> transmittedPowers = new HashMap<>();
+
+    private static ItemStack frequencyStack(String frequency) {
+        ResourceLocation id = ResourceLocation.parse(frequency);
+        var item = BuiltInRegistries.ITEM.getOptional(id)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown item frequency: " + frequency));
+        return new ItemStack(item);
+    }
+
+    public int scriptGetPower(String[] freq) {
+        FrequencyPair pair = requireFrequencyPair(freq);
+        if (level == null || level.isClientSide) {
+            return receivedPowers.getOrDefault(pair, 0);
+        }
+
+        Integer slot = powerInputs.get(pair);
+        if (slot == null) {
+            slot = findFreeSlot(powerInputs);
+            if (slot < 0) {
+                throw new IllegalStateException("No free redstone receiver slots");
+            }
+            powerInputs.put(pair, slot);
+            inputSlotPairs.put(slot, pair);
+            LinkBehaviour link = inputLinks[slot];
+            link.setFrequency(true, frequencyStack(freq[0]));
+            link.setFrequency(false, frequencyStack(freq[1]));
+            link.notifySignalChange();
+            setChanged();
+        }
+        return receivedPowers.getOrDefault(pair, 0);
+    }
+
+    public Object scriptSetSpeed(String[] freq, Object speed) {
+        Set<DigitalTransmissionBlockEntity> transmissions =
+                DigitalTransmissionRegistry.get(freq[0], freq[1]);
+        for (DigitalTransmissionBlockEntity transmission : transmissions) {
+            transmission.setSpeed((int) asDouble(speed));
+        }
+        return speed;
+    }
+
+    private static FrequencyPair requireFrequencyPair(String[] freq) {
+        if (freq == null || freq.length != 2 || freq[0] == null || freq[1] == null
+                || freq[0].isBlank() || freq[1].isBlank()) {
+            throw new IllegalArgumentException("Expected two item IDs, e.g. [\"minecraft:stone\", \"minecraft:dirt\"]");
+        }
+        // Validate IDs immediately so typos do not silently create unusable links.
+        ResourceLocation.parse(freq[0]);
+        ResourceLocation.parse(freq[1]);
+        return new FrequencyPair(freq[0], freq[1]);
+    }
+
+    public int scriptSetPower(String[] freq, Object power) {
+        FrequencyPair pair = requireFrequencyPair(freq);
+
+        if (level == null || level.isClientSide) {
+            return 0;
+        }
+
+        int strength = Math.max(0, Math.min(15, (int) asDouble(power)));
+
+        Integer slot = powerOutputs.get(pair);
+
+        if (slot == null) {
+            slot = findFreeSlot(powerOutputs);
+
+            if (slot < 0) {
+                throw new IllegalStateException(
+                        "No free redstone transmitter slots"
+                );
+            }
+
+            powerOutputs.put(pair, slot);
+            outputSlotPairs.put(slot, pair);
+
+            LinkBehaviour link = outputLinks[slot];
+            link.setFrequency(true, frequencyStack(freq[0]));
+            link.setFrequency(false, frequencyStack(freq[1]));
+        }
+
+        transmittedPowers.put(pair, strength);
+        outputLinks[slot].notifySignalChange();
+
+        setChanged();
+        return strength;
+    }
+
+    private static int findFreeSlot(Map<FrequencyPair, Integer> allocated) {
+        boolean[] used = new boolean[MAX_CHANNELS];
+
+        for (int slot : allocated.values()) {
+            if (slot >= 0 && slot < used.length) {
+                used[slot] = true;
+            }
+        }
+
+        for (int i = 0; i < used.length; i++) {
+            if (!used[i]) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    public String getProgramPath() { return programPath; }
+
+    public boolean isPythonProgram() {
+        return programPath.toLowerCase(java.util.Locale.ROOT).endsWith(".py");
+    }
+
+    private String readProgramFile() {
+        if (level == null || level.isClientSide || level.getServer() == null
+                || programPath.isEmpty() || !isPythonProgram()) return "";
+        try {
+            java.nio.file.Path root = SandboxFileSystem.rootFor(level.getServer())
+                    .toAbsolutePath().normalize();
+            java.nio.file.Path f = root.resolve(programPath).normalize();
+            if (f.startsWith(root) && java.nio.file.Files.isRegularFile(f))
+                return java.nio.file.Files.readString(f);
+        } catch (java.io.IOException e) {
+            AeroComputers.LOGGER.warn("Cannot read program {}: {}", programPath, e.toString());
+        }
+        return "";
+    }
+
+    private void loadProgram(boolean force) {
+        String text = readProgramFile();
+        if (!force && text.equals(program)) return;      // unverändert: nicht neu starten
+        program = text;
+        variables.clear();
+        closePythonRuntime();
+        pythonError = null;
+        editorCompletionUpdateId++;
+        setChanged();
+        sync();
+    }
+
+    public void setProgramPath(String path) {
+        String p = path == null ? "" : path;
+        if (p.equals(programPath)) return;
+        programPath = p;
+        loadProgram(true);
+    }
+
+    public void onFileWritten(String path) {
+        if (path.equals(programPath)) loadProgram(false);
+    }
+
+    public void onPathMoved(String oldP, String newP) {
+        if (programPath.equals(oldP) || programPath.startsWith(oldP + "/")) {
+            programPath = newP + programPath.substring(oldP.length());
+            setChanged();
+            sync();
+        }
+    }
+
+    public void onPathDeleted(String path) {
+        if (programPath.equals(path) || programPath.startsWith(path + "/")) {
+            programPath = "";
+            loadProgram(true);
+        }
+    }
 
 
     private static final int PYTHON_STEPS_PER_TICK = 64;
@@ -69,24 +246,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     private boolean subLevelSeenThisCycle = false;
 
     private boolean running = true;
-
-    private final Map<String, Object> persistentVariables = new LinkedHashMap<>();
-
-    public enum SignalMode { S, B }
-
-    public static class IOChannel {
-        public String id;
-        public int slot; // index into inputLinks/outputLinks
-        public boolean active = false;
-        public String variableName;
-        public SignalMode mode = SignalMode.S;
-        public int value = 0;
-        public ItemStack freqA = ItemStack.EMPTY;
-        public ItemStack freqB = ItemStack.EMPTY;
-    }
-
-    private final List<IOChannel> inputChannels = new ArrayList<>();
-    private final List<IOChannel> outputChannels = new ArrayList<>();
 
     private static final int MAX_CHANNELS = 50;
 
@@ -158,14 +317,11 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     protected void write(CompoundTag tag, HolderLookup.Provider provider, boolean clientPacket) {
         super.write(tag, provider, clientPacket);
 
-        tag.putString("Program", program);
+        tag.putString("ProgramPath", programPath);
+        tag.put("PowerInputs", writePowerPairs(powerInputs, null));
+        tag.put("PowerOutputs", writePowerPairs(powerOutputs, transmittedPowers));
         // Pause state is transient in saved world data, but is sent to clients for GUI display.
         if (clientPacket) tag.putBoolean("Running", running);
-        tag.put("PersistentVars", writePersistentVariables());
-        tag.put("InputChannels", writeChannels(inputChannels, provider));
-        tag.put("OutputChannels", writeChannels(outputChannels, provider));
-        tag.putInt("ChannelUpdateId", channelUpdateId);
-        tag.putInt("VariableUpdateId", variableUpdateId);
         tag.putInt("EditorCompletionUpdateId", editorCompletionUpdateId);
 
 
@@ -177,47 +333,21 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         tag.putInt("Receive", receivedSignal);
     }
 
-    public void setProgram(String text) {
-        String newProgram = text == null ? "" : text;
-        // The screen sends its contents when it closes. Avoid restarting the
-        // runtime when the saved text has not actually changed.
-        if (Objects.equals(program, newProgram)) {
-            return;
-        }
-        program = newProgram;
-        variables.clear();
-        // Lazy: tick() starts the new program, but only while the computer is not paused.
-        closePythonRuntime();
-        pythonError = null;
-
-        editorCompletionUpdateId++;
-
-        setChanged();
-        sync();
-    }
-
     @Override
     protected void read(CompoundTag tag, HolderLookup.Provider provider, boolean clientPacket) {
         super.read(tag, provider, clientPacket);
 
-        program = tag.getString("Program");
+        programPath = tag.getString("ProgramPath");
+        powerInputs.clear();
+        powerOutputs.clear();
+        inputSlotPairs.clear();
+        outputSlotPairs.clear();
+        receivedPowers.clear();
+        transmittedPowers.clear();
+        if (tag.contains("PowerInputs")) readPowerPairs(tag.getList("PowerInputs", Tag.TAG_COMPOUND), powerInputs, inputSlotPairs, null);
+        if (tag.contains("PowerOutputs")) readPowerPairs(tag.getList("PowerOutputs", Tag.TAG_COMPOUND), powerOutputs, outputSlotPairs, transmittedPowers);
         variables.clear();
         running = clientPacket && tag.contains("Running") ? tag.getBoolean("Running") : true; // Pause is not saved across world reloads.
-        if (tag.contains("PersistentVars")) readPersistentVariables(tag.getCompound("PersistentVars"));
-        if (tag.contains("InputChannels")) {
-            inputChannels.clear();
-            inputChannels.addAll(
-                    readChannels(tag.getCompound("InputChannels"), provider)
-            );
-        }
-        if (tag.contains("OutputChannels")) {
-            outputChannels.clear();
-            outputChannels.addAll(
-                    readChannels(tag.getCompound("OutputChannels"), provider)
-            );
-        }
-        channelUpdateId = tag.getInt("ChannelUpdateId");
-        variableUpdateId = tag.getInt("VariableUpdateId");
         if (tag.contains("DrawObjects")) {
             drawObjects.clear();
             drawObjects.addAll(readDrawObjects(tag.getCompound("DrawObjects")));
@@ -235,21 +365,46 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     @Override
     public void initialize() {
         super.initialize();
+        restoreLinkFrequencies(powerInputs, inputLinks);
+        restoreLinkFrequencies(powerOutputs, outputLinks);
+    }
 
-        for (IOChannel c : inputChannels) {
-            if (!c.freqA.isEmpty())
-                inputLinks[c.slot].setFrequency(true, c.freqA);
-
-            if (!c.freqB.isEmpty())
-                inputLinks[c.slot].setFrequency(false, c.freqB);
+    private void restoreLinkFrequencies(Map<FrequencyPair, Integer> pairs, LinkBehaviour[] links) {
+        if (links == null) return;
+        for (Map.Entry<FrequencyPair, Integer> entry : pairs.entrySet()) {
+            int slot = entry.getValue();
+            if (slot < 0 || slot >= links.length || links[slot] == null) continue;
+            FrequencyPair pair = entry.getKey();
+            links[slot].setFrequency(true, frequencyStack(pair.first()));
+            links[slot].setFrequency(false, frequencyStack(pair.second()));
         }
+    }
 
-        for (IOChannel c : outputChannels) {
-            if (!c.freqA.isEmpty())
-                outputLinks[c.slot].setFrequency(true, c.freqA);
+    private ListTag writePowerPairs(Map<FrequencyPair, Integer> pairs, Map<FrequencyPair, Integer> powers) {
+        ListTag list = new ListTag();
+        for (Map.Entry<FrequencyPair, Integer> entry : pairs.entrySet()) {
+            CompoundTag pairTag = new CompoundTag();
+            pairTag.putString("first", entry.getKey().first());
+            pairTag.putString("second", entry.getKey().second());
+            pairTag.putInt("slot", entry.getValue());
+            if (powers != null) pairTag.putInt("power", powers.getOrDefault(entry.getKey(), 0));
+            list.add(pairTag);
+        }
+        return list;
+    }
 
-            if (!c.freqB.isEmpty())
-                outputLinks[c.slot].setFrequency(false, c.freqB);
+    private void readPowerPairs(ListTag list, Map<FrequencyPair, Integer> pairs,
+                                Map<Integer, FrequencyPair> slots, Map<FrequencyPair, Integer> powers) {
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag entry = list.getCompound(i);
+            String first = entry.getString("first");
+            String second = entry.getString("second");
+            int slot = entry.getInt("slot");
+            if (first.isBlank() || second.isBlank() || slot < 0 || slot >= MAX_CHANNELS) continue;
+            FrequencyPair pair = new FrequencyPair(first, second);
+            pairs.put(pair, slot);
+            slots.put(slot, pair);
+            if (powers != null) powers.put(pair, Math.max(0, Math.min(15, entry.getInt("power"))));
         }
     }
 
@@ -293,8 +448,19 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
     private void ensurePythonRuntime() {
         if (pythonRuntime != null || level == null || level.isClientSide) return;
+
+        var server = level.getServer();
+        if (server == null) return;
+
+        java.nio.file.Path fileRoot = SandboxFileSystem.rootFor(server);
+
         hudScriptApi = new HudScriptApi(this);
-        pythonRuntime = new PythonScriptRuntime(new AeroScriptApi(this), hudScriptApi.asProxy(), this::onPythonPrint);
+        pythonRuntime = new PythonScriptRuntime(
+                new AeroScriptApi(this),
+                hudScriptApi.asProxy(),
+                this::onPythonPrint,
+                fileRoot
+        );
     }
 
     private void closePythonRuntime() {
@@ -312,10 +478,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     private void startPythonProgram() {
         if (pythonRuntime == null) return;
         try {
-            for (Map.Entry<String, Object> entry : persistentVariables.entrySet()) {
-                pythonRuntime.setVariable(entry.getKey(), entry.getValue());
-                variables.put(entry.getKey(), entry.getValue());
-            }
             for (Map.Entry<String, Object> entry : variables.entrySet()) {
                 if (entry.getValue() instanceof Number || entry.getValue() instanceof String
                         || entry.getValue() instanceof Boolean || entry.getValue() instanceof List<?>) {
@@ -331,7 +493,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     private void runPythonSteps(int maxSteps) {
-        if (!running || program == null || program.isBlank()) return;
+        if (!running || program == null || program.isBlank() || !isPythonProgram()) return;
 
         // Lazy (re)start: only happens while the computer is running.
         if (pythonRuntime == null) {
@@ -340,14 +502,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         }
         if (pythonRuntime == null || pythonRuntime.isFinished()) return;
 
-        // Refresh hardware inputs before stepping.
-        for (IOChannel channel : inputChannels) {
-            if (channel.variableName == null || channel.variableName.isBlank()) continue;
-            double value = channel.mode == SignalMode.B
-                    ? (channel.value > 0 ? 1.0 : 0.0) : channel.value;
-            pythonRuntime.setVariable(channel.variableName, value);
-        }
-
         try {
             // One host->guest call; the stepping loop runs inside Python.
             pythonRuntime.step(maxSteps, PYTHON_BUDGET_SECONDS);
@@ -355,31 +509,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             pythonError = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
             AeroComputers.LOGGER.error("Python script error at {}: {}", worldPosition, pythonError, exception);
             setChanged();
-        }
-    }
-
-    /** Only reads what Java actually needs: output channels and persistent variables. */
-    private void syncPythonVariables() {
-        if (pythonRuntime == null) return;
-
-        for (IOChannel ch : outputChannels) {
-            if (ch.variableName == null || ch.variableName.isBlank()) continue;
-            try {
-                Object v = pythonRuntime.getVariable(ch.variableName);
-                if (v instanceof Number || v instanceof Boolean) variables.put(ch.variableName, v);
-            } catch (RuntimeException ignored) {
-            }
-        }
-
-        for (String name : persistentVariables.keySet()) {
-            try {
-                Object v = pythonRuntime.getVariable(name);
-                if (v instanceof Number || v instanceof String || v instanceof Boolean) {
-                    persistentVariables.put(name, v);
-                    variables.put(name, v);
-                }
-            } catch (RuntimeException ignored) {
-            }
         }
     }
 
@@ -580,25 +709,15 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     private void onInputPowerChanged(int slot, int power) {
-        for (IOChannel ch : inputChannels) {
-            if (ch.slot == slot) {
-                ch.value = power;
-                if (ch.variableName != null) {
-                    double val = ch.mode == SignalMode.B ? (power > 0 ? 1.0 : 0.0) : power;
-                    variables.put(ch.variableName, val);
-                }
-                return;
-            }
+        FrequencyPair pair = inputSlotPairs.get(slot);
+        if (pair != null) {
+            receivedPowers.put(pair, power);
         }
     }
 
     private int getOutputTransmitStrength(int slot) {
-        for (IOChannel ch : outputChannels) {
-            if (ch.slot == slot) {
-                return ch.value;
-            }
-        }
-        return 0;
+        FrequencyPair pair = outputSlotPairs.get(slot);
+        return pair == null ? 0 : transmittedPowers.getOrDefault(pair, 0);
     }
 
     static double round2(double value) {
@@ -647,20 +766,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         steps = Math.max(1, Math.min(PYTHON_STEPS_PER_TICK, steps));
         runPythonSteps(steps);
 
-        syncPythonVariables();
-
-        for (IOChannel ch : outputChannels) {
-            Object raw = variables.getOrDefault(ch.variableName, 0.0);
-            double num = asDouble(raw);
-            int newValue = ch.mode == SignalMode.B
-                    ? (num > 0 ? 15 : 0)
-                    : (int) Math.max(0, Math.min(15, num));
-            boolean changed = newValue != ch.value;
-            ch.value = newValue;
-            if (changed && outputLinks[ch.slot] != null) {
-                outputLinks[ch.slot].notifySignalChange();
-            }
-        }
 
         // Throttled: sending the whole block entity NBT every tick is expensive.
         if (hudDirty && level.getGameTime() % HUD_SYNC_INTERVAL_TICKS == 0) {
@@ -733,6 +838,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     public void onLoad() {
         super.onLoad();
         if (this.level != null && !this.level.isClientSide) {
+            program = readProgramFile();
             ComputerRegistry.register(computerName, this);
             closePythonRuntime();
             running = true; // Reloading the computer automatically resumes its program.
@@ -743,6 +849,7 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     @Override
     public void remove() {
         closePythonRuntime();
+        HudRegistry.clearComputer(worldPosition);
         super.remove();
         if (level != null && !level.isClientSide) {
             ComputerRegistry.unregister(computerName, this);
@@ -781,281 +888,12 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
 
-    public void addPersistentVariable(String name) {
-        persistentVariables.putIfAbsent(name, 0.0);
-        variablesChanged();
-    }
-
-    public void removePersistentVariable(String name) {
-        persistentVariables.remove(name);
-        variablesChanged();
-    }
-
-    public void renamePersistentVariable(String oldName, String newName) {
-        if (!persistentVariables.containsKey(oldName) || persistentVariables.containsKey(newName)) return;
-        Object value = persistentVariables.remove(oldName);
-        persistentVariables.put(newName, value);
-        variablesChanged();
-    }
-
-    public void setPersistentVariableValue(String name, double value) {
-        if (persistentVariables.containsKey(name)) {
-            persistentVariables.put(name, value);
-            variablesChanged();
-        }
-    }
-
-    public Map<String, Object> getPersistentVariablesSnapshot() {
-        return new LinkedHashMap<>(persistentVariables);
-    }
-
     public void sync() {
         if (level != null && !level.isClientSide) {
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
 
-
-    private CompoundTag writePersistentVariables() {
-        CompoundTag tag = new CompoundTag();
-        for (var entry : persistentVariables.entrySet()) {
-            CompoundTag varTag = new CompoundTag();
-            Object value = entry.getValue();
-            if (value instanceof Number n) {
-                varTag.putString("type", "double");
-                varTag.putDouble("value", n.doubleValue());
-            } else if (value instanceof Boolean b) {
-                varTag.putString("type", "boolean");
-                varTag.putBoolean("value", b);
-            } else {
-                varTag.putString("type", "string");
-                varTag.putString("value", String.valueOf(value));
-            }
-            tag.put(entry.getKey(), varTag);
-        }
-        return tag;
-    }
-
-    private void readPersistentVariables(CompoundTag tag) {
-        persistentVariables.clear();
-        for (String key : tag.getAllKeys()) {
-            CompoundTag varTag = tag.getCompound(key);
-            Object value = switch (varTag.getString("type")) {
-                case "boolean" -> varTag.getBoolean("value");
-                case "string" -> varTag.getString("value");
-                default -> varTag.getDouble("value");
-            };
-            persistentVariables.put(key, value);
-        }
-    }
-
-    public IOChannel addInputChannel() {
-        for (int i = 0; i < MAX_CHANNELS; i++) {
-            final int slotIndex = i;
-            boolean used = inputChannels.stream().anyMatch(c -> c.slot == slotIndex);
-            if (!used) {
-                IOChannel ch = new IOChannel();
-                ch.id = UUID.randomUUID().toString();
-                ch.slot = slotIndex;
-                ch.variableName = "input" + slotIndex;
-                inputChannels.add(ch);
-                editorCompletionUpdateId++;
-                setChanged();
-                sync();
-                return ch;
-            }
-        }
-        return null; // all MAX_CHANNELS slots in use
-    }
-
-    public IOChannel addOutputChannel() {
-        for (int i = 0; i < MAX_CHANNELS; i++) {
-            final int slotIndex = i;
-            boolean used = outputChannels.stream().anyMatch(c -> c.slot == slotIndex);
-            if (!used) {
-                IOChannel ch = new IOChannel();
-                ch.id = UUID.randomUUID().toString();
-                ch.slot = slotIndex;
-                ch.variableName = "output" + slotIndex;
-                outputChannels.add(ch);
-                editorCompletionUpdateId++;
-                setChanged();
-                sync();
-                return ch;
-            }
-        }
-        return null; // all MAX_CHANNELS slots in use
-    }
-
-    public void removeInputChannel(String id) {
-        editChannel(inputChannels, id, c -> {
-            inputLinks[c.slot].setFrequency(true, ItemStack.EMPTY);
-            inputLinks[c.slot].setFrequency(false, ItemStack.EMPTY);
-        });
-        inputChannels.removeIf(c -> c.id.equals(id));
-        editorCompletionUpdateId++;
-        setChanged();
-        sync();
-    }
-
-    public void removeOutputChannel(String id) {
-        editChannel(outputChannels, id, c -> {
-            outputLinks[c.slot].setFrequency(true, ItemStack.EMPTY);
-            outputLinks[c.slot].setFrequency(false, ItemStack.EMPTY);
-        });
-        outputChannels.removeIf(c -> c.id.equals(id));
-        editorCompletionUpdateId++;
-        setChanged();
-        sync();
-    }
-
-    private static void editChannel(List<IOChannel> list, String id, java.util.function.Consumer<IOChannel> editor) {
-        for (IOChannel c : list) {
-            if (c.id.equals(id)) {
-                editor.accept(c);
-                return;
-            }
-        }
-    }
-
-    public void setInputChannelName(String id, String name) {
-        editChannel(inputChannels, id, c -> c.variableName = name);
-        editorCompletionUpdateId++;
-        setChanged();
-        sync();
-    }
-
-    public void setOutputChannelName(String id, String name) {
-        editChannel(outputChannels, id, c -> c.variableName = name);
-        editorCompletionUpdateId++;
-        setChanged();
-        sync();
-    }
-
-    public void setInputChannelMode(String id, SignalMode mode) {
-        editChannel(inputChannels, id, c -> c.mode = mode);
-        channelsChanged();
-    }
-
-    public void setOutputChannelMode(String id, SignalMode mode) {
-        editChannel(outputChannels, id, c -> c.mode = mode);
-        channelsChanged();
-    }
-
-    public void setInputChannelFrequency(String id, boolean first, ItemStack stack) {
-
-        ItemStack copy = stack.copy();
-        copy.setCount(1);
-
-        editChannel(inputChannels, id, c -> {
-
-            if (first)
-                c.freqA = copy;
-            else
-                c.freqB = copy;
-
-            inputLinks[c.slot].setFrequency(first, copy);
-        });
-
-        channelsChanged();
-    }
-
-    public void setOutputChannelFrequency(String id, boolean first, ItemStack stack) {
-
-        ItemStack copy = stack.copy();
-        copy.setCount(1);
-
-        editChannel(outputChannels, id, c -> {
-
-            if (first)
-                c.freqA = copy;
-            else
-                c.freqB = copy;
-
-            LinkBehaviour link = outputLinks[c.slot];
-
-            if (link != null) {
-                link.setFrequency(first, copy);
-            }
-        });
-
-        channelsChanged();
-    }
-
-    public List<IOChannel> getInputChannels() { return inputChannels; }
-    public List<IOChannel> getOutputChannels() { return outputChannels; }
-
-
-    private CompoundTag writeChannels(List<IOChannel> list, HolderLookup.Provider provider) {
-        ListTag listTag = new ListTag();
-
-        for (IOChannel c : list) {
-            CompoundTag ct = new CompoundTag();
-
-            ct.putString("id", c.id);
-            ct.putInt("slot", c.slot);
-            ct.putString("name", c.variableName);
-            ct.putString("mode", c.mode.name());
-
-            if (!c.freqA.isEmpty()) {
-                ct.put("freqA", c.freqA.saveOptional(provider));
-            }
-
-            if (!c.freqB.isEmpty()) {
-                ct.put("freqB", c.freqB.saveOptional(provider));
-            }
-
-            listTag.add(ct);
-        }
-
-        CompoundTag tag = new CompoundTag();
-        tag.put("channels", listTag);
-
-        return tag;
-    }
-
-    private List<IOChannel> readChannels(CompoundTag tag, HolderLookup.Provider provider) {
-        List<IOChannel> result = new ArrayList<>();
-        ListTag listTag = tag.getList("channels", Tag.TAG_COMPOUND);
-        for (int i = 0; i < listTag.size(); i++) {
-            CompoundTag ct = listTag.getCompound(i);
-            IOChannel c = new IOChannel();
-            c.id = ct.getString("id");
-            c.slot = ct.getInt("slot");
-            c.variableName = ct.getString("name");
-            c.mode = SignalMode.valueOf(ct.getString("mode"));
-            c.active = true;
-
-            if (ct.contains("freqA")) {
-                c.freqA = ItemStack.parseOptional(
-                        provider,
-                        ct.getCompound("freqA")
-                );
-            }
-
-            if (ct.contains("freqB")) {
-                c.freqB = ItemStack.parseOptional(
-                        provider,
-                        ct.getCompound("freqB")
-                );
-            }
-            result.add(c);
-        }
-        return result;
-    }
-
-    private int channelUpdateId = 0;
-
-    public int getChannelUpdateId() {
-        return channelUpdateId;
-    }
-
-    public void channelsChanged() {
-        channelUpdateId++;
-        editorCompletionUpdateId++;
-        setChanged();
-        sync();
-    }
 
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider provider) {
@@ -1092,16 +930,20 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                 new HashMap<>();
 
         for (DrawObject o : drawObjects) {
+
             if (o.freqOne == null || o.freqOne.isBlank()
                     || o.freqTwo == null || o.freqTwo.isBlank()) {
                 continue;
             }
 
-            var entry = new HudRegistry.DrawEntry(
+            HudRegistry.DrawEntry entry = new HudRegistry.DrawEntry(
                     o.type,
-                    o.x, o.y,
-                    o.x2, o.y2,
-                    o.w, o.h,
+                    o.x,
+                    o.y,
+                    o.x2,
+                    o.y2,
+                    o.w,
+                    o.h,
                     o.text,
                     o.fontSize,
                     o.width,
@@ -1115,28 +957,26 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                     List.copyOf(o.ys)
             );
 
-            var key = new HudRegistry.FreqPair(o.freqOne, o.freqTwo);
+            HudRegistry.FreqPair key =
+                    new HudRegistry.FreqPair(o.freqOne, o.freqTwo);
 
             grouped.computeIfAbsent(key, ignored -> new ArrayList<>())
                     .add(entry);
         }
 
-        HudRegistry.replaceAll(grouped);
+        // Remove this computer's previous entries from every frequency.
+        HudRegistry.clearComputer(worldPosition);
+
+        // Register this computer's current entries.
+        grouped.forEach((key, entries) ->
+                HudRegistry.update(
+                        key.freqOne(),
+                        key.freqTwo(),
+                        worldPosition,
+                        entries
+                )
+        );
     }
-
-    private int variableUpdateId = 0;
-
-    public int getVariableUpdateId() {
-        return variableUpdateId;
-    }
-
-    private void variablesChanged() {
-        variableUpdateId++;
-        editorCompletionUpdateId++;
-        setChanged();
-        sync();
-    }
-
 
     private CompoundTag writeDrawObjects() {
         ListTag listTag = new ListTag();
@@ -1227,29 +1067,9 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
 
-    /**
-     * The editor derives functions/classes/variables from the program text itself
-     * (via the shared ProgramAnalyzer). The only thing it cannot know is what lives
-     * outside the text: persistent variables and channel variable names.
-     */
+    /** The editor derives functions, classes, and variables from the program text. */
     public EditorCompletions getEditorCompletions() {
-        Set<String> extra = new LinkedHashSet<>(persistentVariables.keySet());
-
-        addChannelVariables(extra, inputChannels);
-        addChannelVariables(extra, outputChannels);
-
-        return new EditorCompletions(List.copyOf(extra));
-    }
-
-    private static void addChannelVariables(
-            Set<String> variables,
-            Collection<IOChannel> channels
-    ) {
-        for (IOChannel channel : channels) {
-            if (channel.variableName != null && !channel.variableName.isBlank()) {
-                variables.add(channel.variableName);
-            }
-        }
+        return new EditorCompletions(List.of());
     }
 
     public record EditorCompletions(List<String> extraVariables) {}

@@ -6,10 +6,14 @@ import org.graalvm.polyglot.Engine;
 import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.ResourceLimits;
 import org.graalvm.polyglot.Value;
+import org.graalvm.polyglot.io.IOAccess;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -26,8 +30,16 @@ import java.util.function.Consumer;
 public final class PythonScriptRuntime implements AutoCloseable {
 
     /** One engine shared by every computer: compiled code and warmup are reused. */
+    private static final Path RUNTIME_DIR = net.neoforged.fml.loading.FMLPaths.GAMEDIR.get()
+            .resolve("aerocomputers").resolve(".runtime").toAbsolutePath().normalize();
+
+    static {
+        // Must run before the Engine below is created.
+        System.setProperty("polyglot.engine.userResourceCache", RUNTIME_DIR.toString());
+    }
+
     private static final Engine ENGINE = Engine.newBuilder()
-            .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.WarnInterpreterOnly", "false")   // remove the UserResourceCache option
             .build();
 
     /** Safety net for code that is not stepped cooperatively (bodies of def, while True in functions...). */
@@ -40,6 +52,8 @@ public final class PythonScriptRuntime implements AutoCloseable {
     private boolean started;
     private boolean finished;
     private final Consumer<String> output;
+
+
 
     private static final String BOOTSTRAP = """
         def _aero_make_runtime():
@@ -65,12 +79,83 @@ public final class PythonScriptRuntime implements AutoCloseable {
             _aero_tuple = _aero_builtins.tuple
             _aero_dict = _aero_builtins.dict
             _aero_allowed_imports = set(_aero_allowed_imports_config.split(","))
+            
+            import types as _aero_types
+            import sys as _aero_sys
+            _aero_open = _aero_builtins.open
+            _aero_modules = {}
+
+            def _aero_module_path(name):
+                if not name.isidentifier():
+                    return None
+                prefix = _aero_globals().get("_aero_module_dir", "")
+                candidates = [(prefix + "/" if prefix else "") + name + ".py", name + ".py"]
+                for path in candidates:
+                    try:
+                        f = _aero_open(path, "r", encoding="utf-8")
+                        f.close()
+                        return path
+                    except Exception:
+                        pass
+                return None
+
+            def _aero_require(root):
+                # allowed library -> fine; otherwise it must be a local file, which gets loaded now
+                if root in _aero_allowed_imports:
+                    return
+                _aero_load_local(root)
+
+            def _aero_require_imports(tree):
+                for node in _aero_ast.walk(tree):
+                    if isinstance(node, _aero_ast.Import):
+                        for alias in node.names:
+                            _aero_require(alias.name.split(".")[0])
+                    elif isinstance(node, _aero_ast.ImportFrom):
+                        if node.level != 0 or not node.module:
+                            raise ImportError("Relative imports are not allowed")
+                        _aero_require(node.module.split(".")[0])
+
+            def _aero_load_local(name):
+                cached = _aero_modules.get(name)
+                if cached is not None:
+                    return cached
+                path = _aero_module_path(name)
+                if path is None:
+                    raise ImportError("No module named " + name)
+                if name in _aero_sys.modules:
+                    raise ImportError("Local module name conflicts with a built-in module: " + name)
+                f = _aero_open(path, "r", encoding="utf-8")
+                try:
+                    source = f.read()
+                finally:
+                    f.close()
+                tree = _aero_ast.parse(source, path, "exec")
+                module = _aero_types.ModuleType(name)
+                ns = module.__dict__
+                ns["__builtins__"] = _aero_safe_builtins
+                ns["aero"] = _aero_globals().get("aero")
+                ns["hud"] = _aero_globals().get("hud")
+                # register first so circular imports don't loop
+                _aero_modules[name] = module
+                _aero_sys.modules[name] = module
+                try:
+                    _aero_require_imports(tree)     # load this module's own local imports first
+                    _aero_exec(_aero_compile(tree, path, "exec"), ns, ns)
+                except BaseException:
+                    _aero_modules.pop(name, None)
+                    _aero_sys.modules.pop(name, None)
+                    raise
+                return module
 
             def _aero_safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+                if level != 0:
+                    raise ImportError("Relative imports are not allowed: " + name)
                 root = name.split(".")[0]
-                if level != 0 or root not in _aero_allowed_imports:
-                    raise ImportError("Import not allowed: " + name)
-                return _aero_original_import(name, globals, locals, fromlist, level)
+                if root in _aero_allowed_imports:
+                    return _aero_original_import(name, globals, locals, fromlist, level)
+                if "." not in name:
+                    return _aero_load_local(name)
+                raise ImportError("Import not allowed: " + name)
 
             _aero_safe_builtins = {
                 name: getattr(_aero_builtins, name)
@@ -81,7 +166,9 @@ public final class PythonScriptRuntime implements AutoCloseable {
                     "ValueError", "TypeError", "IndexError", "KeyError", "RuntimeError",
                     "set", "sorted", "SyntaxError", "ImportError", "StopIteration",
                     "__build_class__", "object", "super", "property", "staticmethod", "classmethod",
-                    "hasattr", "AttributeError", "NotImplementedError"
+                    "hasattr", "AttributeError", "NotImplementedError",
+                    "open", "OSError", "IOError", "FileNotFoundError", "FileExistsError",
+                    "PermissionError", "IsADirectoryError", "NotADirectoryError", "UnicodeDecodeError"
                 )
             }
             _aero_safe_builtins["__import__"] = _aero_safe_import
@@ -140,15 +227,18 @@ public final class PythonScriptRuntime implements AutoCloseable {
                     node.finalbody = self._body(node.finalbody)
                     return node
                 def visit_With(self, node):
-                    raise SyntaxError("with statements are not supported")
+                    for item in node.items:
+                        item.context_expr = self.visit(item.context_expr)
+                    node.body = self._body(node.body)
+                    return node
                 def visit_Import(self, node):
                     for alias in node.names:
-                        if alias.name.split(".")[0] not in _aero_allowed_imports:
-                            raise ImportError("Import not allowed: " + alias.name)
+                        _aero_require(alias.name.split(".")[0])
                     return node
                 def visit_ImportFrom(self, node):
-                    if node.level != 0 or not node.module or node.module.split(".")[0] not in _aero_allowed_imports:
+                    if node.level != 0 or not node.module:
                         raise ImportError("Import not allowed: " + str(node.module))
+                    _aero_require(node.module.split(".")[0])
                     return node
 
             class __AeroAssignedNames(_aero_ast.NodeVisitor):
@@ -199,6 +289,9 @@ public final class PythonScriptRuntime implements AutoCloseable {
                 return _AeroApi(target)
 
             def _aero_start(source):
+                for _n in list(_aero_modules):
+                     _aero_sys.modules.pop(_n, None)
+                     _aero_modules.clear()
                 tree = _aero_ast.parse(source, mode="exec")
                 assigned = __AeroAssignedNames()
                 assigned.visit(tree)
@@ -244,11 +337,7 @@ public final class PythonScriptRuntime implements AutoCloseable {
         _aero_start, _aero_step_n, _aero_get_names, _aero_wrap_api = _aero_make_runtime()
         """;
 
-    public PythonScriptRuntime(Object aeroApi, Object hudApi) {
-        this(aeroApi, hudApi, line -> {});
-    }
-
-    public PythonScriptRuntime(Object aeroApi, Object hudApi, Consumer<String> output) {
+    public PythonScriptRuntime(Object aeroApi, Object hudApi, Consumer<String> output, Path fileRoot) {
         this.output = output == null ? line -> {} : output;
         OutputStream chatOutput = new OutputStream() {
             private final ByteArrayOutputStream line = new ByteArrayOutputStream();
@@ -269,16 +358,23 @@ public final class PythonScriptRuntime implements AutoCloseable {
                 PythonScriptRuntime.this.output.accept(text);
             }
         };
+
+        IOAccess ioAccess;
+        try {
+            ioAccess = IOAccess.newBuilder().fileSystem(new SandboxFileSystem(fileRoot, RUNTIME_DIR)).build();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
         this.context = Context.newBuilder("python")
                 .engine(ENGINE)
                 .out(chatOutput)
-                // EXPLICIT + list/iterable access: Java Lists (getPos(), radar() ...) become indexable arrays
                 .allowHostAccess(HostAccess.newBuilder(HostAccess.EXPLICIT)
                         .allowListAccess(true)
                         .allowIterableAccess(true)
                         .build())
                 .allowHostClassLookup(name -> false)
-                .allowIO(false)
+                .allowIO(ioAccess)
                 .allowCreateThread(false)
                 .allowNativeAccess(false)
                 .resourceLimits(ResourceLimits.newBuilder()

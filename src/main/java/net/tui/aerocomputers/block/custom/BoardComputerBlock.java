@@ -92,9 +92,9 @@ public class BoardComputerBlock extends DirectionalKineticBlock implements Entit
         Direction preferred = this.getPreferredFacing(context);
         if (preferred != null && preferred.getAxis() != Direction.Axis.Y
                 && !(context.getPlayer() != null && context.getPlayer().isShiftKeyDown())) {
-            return this.defaultBlockState().setValue(DirectionalKineticBlock.FACING, preferred.getOpposite());
+            return this.defaultBlockState().setValue(DirectionalKineticBlock.FACING, preferred);
         }
-        return this.defaultBlockState().setValue(DirectionalKineticBlock.FACING, context.getHorizontalDirection().getOpposite());
+        return this.defaultBlockState().setValue(DirectionalKineticBlock.FACING, context.getHorizontalDirection().getOpposite().getClockWise());
     }
 
     @Override

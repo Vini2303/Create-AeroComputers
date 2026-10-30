@@ -16,16 +16,16 @@ public final class AeroCreativeTabRenderer {
                     "textures/gui/creative_tab/computer.png"
             );
 
-    private static final ResourceLocation KINETICS_BANNER =
-            ResourceLocation.fromNamespaceAndPath(
-                    "createaerocomputers",
-                    "textures/gui/creative_tab/kinetics.png"
-            );
-
     private static final ResourceLocation TRANSFORMERS_BANNER =
             ResourceLocation.fromNamespaceAndPath(
                     "createaerocomputers",
                     "textures/gui/creative_tab/transformer.png"
+            );
+
+    private static final ResourceLocation RESOURCES_BANNER =
+            ResourceLocation.fromNamespaceAndPath(
+                    "createaerocomputers",
+                    "textures/gui/creative_tab/resources.png"
             );
 
     private static final int BANNER_WIDTH = 162;
@@ -51,11 +51,11 @@ public final class AeroCreativeTabRenderer {
         int clipTop = top + 17;
         int clipBottom = top + 108 + Y_OFFSET;
 
-        int scrollRows = Math.round(scrollOffs*(8-5))*18;
+        int scrollRows = Math.round(scrollOffs*(7-5))*18;
 
         drawBanner(
                 graphics, minecraft, COMPUTERS_BANNER,
-                x, top + 18 + Y_OFFSET - scrollRows,
+                x, top + (18*(0+1)) + Y_OFFSET - scrollRows,
                 clipTop, clipBottom,
                 Component.translatable(
                         "gui.createaerocomputers.banners.computer"
@@ -63,20 +63,20 @@ public final class AeroCreativeTabRenderer {
         );
 
         drawBanner(
-                graphics, minecraft, KINETICS_BANNER,
-                x, top + 72 + Y_OFFSET - scrollRows,
+                graphics, minecraft, TRANSFORMERS_BANNER,
+                x, top + (18*(3+1)) + Y_OFFSET - scrollRows,
                 clipTop, clipBottom,
                 Component.translatable(
-                        "gui.createaerocomputers.banners.kinetics"
+                        "gui.createaerocomputers.banners.transformer"
                 )
         );
 
         drawBanner(
-                graphics, minecraft, TRANSFORMERS_BANNER,
-                x, top + 126 + Y_OFFSET - scrollRows,
+                graphics, minecraft, RESOURCES_BANNER,
+                x, top + (18*(5+1)) + Y_OFFSET - scrollRows,
                 clipTop, clipBottom,
                 Component.translatable(
-                        "gui.createaerocomputers.banners.transformer"
+                        "gui.createaerocomputers.banners.resources"
                 )
         );
     }

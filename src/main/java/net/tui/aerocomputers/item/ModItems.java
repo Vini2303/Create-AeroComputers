@@ -21,6 +21,18 @@ public class ModItems {
     public static final DeferredItem<Item> TRANSFORMIUM_INGOT = ITEMS.register("transformium_ingot",
             () -> new Item(new Item.Properties()));
 
+    public static final DeferredItem<Item> CALCITE_ALLOY = ITEMS.register("calcite_alloy",
+            () -> new Item(new Item.Properties()));
+
+    public static final DeferredItem<Item> CALCITE_POWDER = ITEMS.register("calcite_powder",
+            () -> new Item(new Item.Properties()));
+
+    public static final DeferredItem<Item> COMPUTING_MECHANISM = ITEMS.register("computing_mechanism",
+            () -> new Item(new Item.Properties()));
+
+    public static final DeferredItem<Item> INCOMPLETE_COMPUTING_MECHANISM = ITEMS.register("incomplete_computing_mechanism",
+            () -> new Item(new Item.Properties()));
+
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }

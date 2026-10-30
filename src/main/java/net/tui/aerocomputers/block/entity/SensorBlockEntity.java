@@ -9,6 +9,7 @@ import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.physics.config.dimension_physics.DimensionPhysicsData;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
@@ -20,6 +21,7 @@ import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -149,7 +151,7 @@ public class SensorBlockEntity extends KineticBlockEntity implements MenuProvide
 
     @Override
     public float calculateStressApplied() {
-        return 4f;
+        return 2f;
     }
 
     @Override
@@ -159,12 +161,16 @@ public class SensorBlockEntity extends KineticBlockEntity implements MenuProvide
 
     // Methods exposed through the deliberately small AeroScriptApi facade.
     public Object get_Pos() {
+        int rpm = (int) Math.abs(getSpeed());
+        if (rpm < 64) return List.of(0,0,0);
         Vector3d pos = new Vector3d(getBlockPos().getX() + 0.5, getBlockPos().getY() + 0.5, getBlockPos().getZ() + 0.5);
         if (currentSubLevel != null) currentSubLevel.logicalPose().transformPosition(pos);
         return List.of(round2(pos.x), round2(pos.y), round2(pos.z));
     }
 
     public Object get_Rot() {
+        int rpm = (int) Math.abs(getSpeed());
+        if (rpm < 64) return List.of(0,0,0);
         if (currentSubLevel == null) return List.of(0.0, 0.0, 0.0);
         Quaterniond start = new Quaterniond().rotateY(Math.toRadians(-getBlockState().getValue(DirectionalKineticBlock.FACING).toYRot()));
         Quaterniond relative = start.invert().mul(new Quaterniond(currentSubLevel.logicalPose().orientation()));
@@ -174,6 +180,8 @@ public class SensorBlockEntity extends KineticBlockEntity implements MenuProvide
     }
 
     public Object get_Vel() {
+        int rpm = (int) Math.abs(getSpeed());
+        if (rpm < 64) return List.of(0,0,0);
         if (currentSubLevel == null) return List.of(0.0, 0.0, 0.0);
         Vector3d current = new Vector3d(getBlockPos().getX() + 0.5, getBlockPos().getY() + 0.5, getBlockPos().getZ() + 0.5);
         Vector3d previous = new Vector3d(current);
@@ -183,7 +191,11 @@ public class SensorBlockEntity extends KineticBlockEntity implements MenuProvide
         return List.of(round2(velocity.x), round2(velocity.y), round2(velocity.z));
     }
 
-    public Object get_Radar() { return getAllSubLevelPositions(); }
+    public Object get_Radar() {
+        int rpm = (int) Math.abs(getSpeed());
+        if (rpm < 64) return List.of();
+        return getAllSubLevelPositions();
+    }
 
 
     @Override
@@ -209,7 +221,6 @@ public class SensorBlockEntity extends KineticBlockEntity implements MenuProvide
     public void remove() {
         super.remove();
         if (this.level != null && !this.level.isClientSide) {
-            AeroComputers.LOGGER.info(SensorRegistry.get(FREQ_ONE, FREQ_TWO).getBlockPos().toString());
             SensorRegistry.unregister(FREQ_ONE, FREQ_TWO, this);
         }
     }

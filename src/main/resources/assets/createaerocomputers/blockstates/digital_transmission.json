@@ -1,0 +1,27 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "createaerocomputers:block/digital_transmission"
+    },
+    "facing=south": {
+      "model": "createaerocomputers:block/digital_transmission",
+      "y": 180
+    },
+    "facing=east": {
+      "model": "createaerocomputers:block/digital_transmission",
+      "y": 90
+    },
+    "facing=west": {
+      "model": "createaerocomputers:block/digital_transmission",
+      "y": 270
+    },
+    "facing=up": {
+      "model": "createaerocomputers:block/digital_transmission",
+      "x": 90
+    },
+    "facing=down": {
+      "model": "createaerocomputers:block/digital_transmission",
+      "x": 270
+    }
+  }
+}

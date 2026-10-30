@@ -3,11 +3,20 @@
   "item.createaerocomputers.raw_transformium": "Raw Transformium",
   "item.createaerocomputers.transformium_ingot": "Transformium Ingot",
 
+  "item.createaerocomputers.calcite_alloy": "Calcite Alloy",
+  "item.createaerocomputers.calcite_powder": "Calcite Powder",
+  "item.createaerocomputers.computing_mechanism": "Computing Mechanism",
+  "item.createaerocomputers.incomplete_computing_mechanism": "Incomplete Computing Mechanism",
+
   "block.createaerocomputers.board_computer": "Board Computer",
   "block.createaerocomputers.hud_display": "HUD Display",
   "block.createaerocomputers.weapon_linker": "Weapon Linker",
 
+  "block.createaerocomputers.calcite_casing": "Calcite Casing",
+
   "block.createaerocomputers.sensor": "Sensor",
+  "block.createaerocomputers.digital_transmission": "Digital Transmission",
+  "block.createaerocomputers.camera": "Camera",
 
   "block.createaerocomputers.transformium": "Transformium",
   "block.createaerocomputers.transformium_ore": "Transformium Ore",
@@ -28,6 +37,10 @@
 
   "tooltip.createaerocomputers.sensor_shift": "Place on a Sublevel to get information and telemetry",
 
+  "tooltip.createaerocomputers.digital_transmission_shift": "Can control the rotation Speed via teh Board computer",
+
+  "tooltip.createaerocomputers.camera_shift": "Create an eye for your computer",
+
   "help.aero.basics": "Basics",
   "help.aero.basics.text": "This is the basics of the Aero Computer.",
 
@@ -45,6 +58,6 @@
 
 
   "gui.createaerocomputers.banners.computer": "Computer",
-  "gui.createaerocomputers.banners.kinetics": "Kinetics",
-  "gui.createaerocomputers.banners.transformer": "Transformer"
+  "gui.createaerocomputers.banners.transformer": "Transformer",
+  "gui.createaerocomputers.banners.resources": "Resources"
 }

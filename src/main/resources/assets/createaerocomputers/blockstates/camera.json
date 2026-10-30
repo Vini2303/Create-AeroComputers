@@ -1,0 +1,27 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "createaerocomputers:block/camera"
+    },
+    "facing=south": {
+      "model": "createaerocomputers:block/camera",
+      "y": 180
+    },
+    "facing=east": {
+      "model": "createaerocomputers:block/camera",
+      "y": 90
+    },
+    "facing=west": {
+      "model": "createaerocomputers:block/camera",
+      "y": 270
+    },
+    "facing=up": {
+      "model": "createaerocomputers:block/camera",
+      "x": 90
+    },
+    "facing=down": {
+      "model": "createaerocomputers:block/camera",
+      "x": 270
+    }
+  }
+}

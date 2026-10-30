@@ -5,19 +5,23 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
 import net.tui.aerocomputers.config.AeroComputersConfig;
-import net.tui.aerocomputers.lang.LanguageSpec;
-import net.tui.aerocomputers.lang.ProgramAnalyzer;
-import net.tui.aerocomputers.lang.ProgramInfo;
-import net.tui.aerocomputers.lang.PyLexer;
+import net.tui.aerocomputers.lang.*;
 import net.tui.aerocomputers.lang.PyLexer.Token;
 import net.tui.aerocomputers.lang.PyLexer.Type;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import static net.minecraft.client.gui.screens.Screen.hasAltDown;
 import static net.minecraft.client.gui.screens.Screen.hasControlDown;
@@ -26,11 +30,14 @@ import static net.minecraft.client.gui.screens.Screen.hasShiftDown;
 /**
  * A VS Code (Dark+) style Python editor.
  *
- * Highlighting: semantic colours, bracket pair colourisation, indent guides, matching bracket box.
+ * Highlighting: semantic colours, bracket pair colourisation, indent guides, matching bracket box,
+ *               f-string replacement fields.
  * Editing: python aware auto indent, auto closing pairs, undo/redo, comment toggle, move/duplicate lines,
  *          word navigation, multi click selection, smart Home, tab stops.
  * Intellisense: fuzzy completion with icons, member completion for modules / hud objects,
  *               import completion, signature help with active parameter.
+ *               Local .py files next to the program are known through LocalModules.
+ * Inline widgets: colour literals (colour picker) and frequency pairs ["a:b", "c:d"] (antenna, popup still empty).
  */
 public class CodeEditorWidget extends AbstractWidget {
 
@@ -54,6 +61,7 @@ public class CodeEditorWidget extends AbstractWidget {
     private static final int C_VARIABLE = 0xFF9CDCFE;
     private static final int C_CONSTANT = 0xFF4FC1FF;
     private static final int C_STRING = 0xFFCE9178;
+    private static final int C_FSTRING_BRACE = 0xFF569CD6;
     private static final int C_NUMBER = 0xFFB5CEA8;
     private static final int C_COMMENT = 0xFF6A9955;
     private static final int[] C_BRACKETS = {0xFFFFD700, 0xFFDA70D6, 0xFF179FFF};
@@ -148,7 +156,7 @@ public class CodeEditorWidget extends AbstractWidget {
     private final Map<Long, Long> bracketPair = new HashMap<>();
     private final Map<String, String> moduleAliases = new HashMap<>();    // alias -> module
     private final Map<String, String> importedNames = new HashMap<>();    // name  -> math.sqrt
-    private final Map<String, String> variableClasses = new HashMap<>();  // var   -> hud.Label / Player
+    private final Map<String, String> variableClasses = new HashMap<>();  // var   -> hud.Label / Player / lib.Vec
     private final Map<String, List<String>> ctorParams = new HashMap<>();   // class -> __init__ params
     private final Map<String, List<String>> methodParams = new HashMap<>(); // method name -> params
     private final Map<String, Set<String>> classMethodNames = new HashMap<>();
@@ -157,6 +165,18 @@ public class CodeEditorWidget extends AbstractWidget {
 
     // libraries the server config allows (what "import x" may use)
     private Set<String> enabledLibs = new TreeSet<>();
+
+    private boolean pythonMode = true;
+    public void setPythonMode(boolean on) {
+        if (pythonMode == on) return;
+        pythonMode = on;
+        closeAutocomplete();
+        rescan();
+    }
+
+    private static final int FQ_W = 174;
+    private static final int FQ_H = 128;
+    private int freqActive = 0;     // which of the two slots receives the next picked item
 
     // function scopes: parameters and locals are only visible inside their function
     private static final class Scope {
@@ -179,10 +199,15 @@ public class CodeEditorWidget extends AbstractWidget {
     private int[] lineScope = new int[0];
     private final Set<String> globalNames = new LinkedHashSet<>();
 
-    // colour literals (0xFF0000 and "#FF0000") + the colour picker popup
-    private record ColorLit(int line, int start, int end, int rgb) {}
+    // inline swatches: colour literals (0xFF0000 and "#FF0000") and frequency pairs (["a:b", "c:d"])
+    // freq == true -> rgb is unused, the swatch shows an antenna and opens the (still empty) frequency popup
+    private record ColorLit(int line, int start, int end, int rgb, boolean freq) {}
     private List<List<ColorLit>> colorsByLine = new ArrayList<>();
     private int maxColorsPerLine = 0;
+
+    /** a frequency item: empty string, or "something:something" */
+    private static final Pattern FREQ_ID =
+            Pattern.compile("^([A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+)?$");
 
     private static final int PK_SV_W = 90;
     private static final int PK_SV_H = 80;
@@ -190,7 +215,22 @@ public class CodeEditorWidget extends AbstractWidget {
     private static final int PK_W = 118;
     private static final int PK_H = 110;
 
+
+    private Supplier<ItemStack> carriedSupplier = () -> ItemStack.EMPTY;
+    private final ItemIconButton[] freqButtons = new ItemIconButton[2];
+
+    public void setCarriedSupplier(Supplier<ItemStack> s) { this.carriedSupplier = s; }
+
+    /** top-left of the first inventory cell while the frequency popup is open, else null */
+    public int[] freqInventoryOrigin() {
+        if (!pickerOpen || !pickerFreq) return null;
+        int[] r = pickerRect();
+        return new int[]{r[0] + 6, r[1] + 48};
+    }
+
+
     private boolean pickerOpen = false;
+    private boolean pickerFreq = false;         // the open popup is the (empty) frequency popup
     private int pickerDrag = 0;                 // 0 none, 1 saturation/value, 2 hue
     private int pickerLine, pickerStart, pickerEnd;
     private boolean pickerString, pickerLower, pickerUndoDone;
@@ -259,15 +299,18 @@ public class CodeEditorWidget extends AbstractWidget {
     public String getText() { return String.join("\n", lines); }
 
     public void setText(String text) {
+        foldKey = null;   // the screen sets the fold key for the new file right after this
         lines.clear();
-        lines.addAll(List.of(text.split("\n", -1)));
+        lines.addAll(List.of(text.replace("\r", "").split("\n", -1)));
         folded.clear();
         undoStack.clear();
         redoStack.clear();
         lastEditKind = KIND_NONE;
         clearSelection();
-        cursorLine = Math.min(cursorLine, lines.size() - 1);
-        cursorColumn = Math.min(cursorColumn, lines.get(cursorLine).length());
+        cursorLine = 0;
+        cursorColumn = 0;
+        scrollX = 0;
+        scrollY = 0;
         closeAutocomplete();
         rescan();
         clampScroll();
@@ -303,22 +346,49 @@ public class CodeEditorWidget extends AbstractWidget {
     private int xOf(int line, int col) {
         String s = lines.get(line);
         int c = Math.min(col, s.length());
-        return textOrigin() + font().width(s.substring(0, c)) + SWATCH_W * swatchesBefore(line, c);
+        return textOrigin() + font().width(visibleText(line, c)) + SWATCH_W * swatchesBefore(line, c);
     }
 
-    /** Number of colour squares drawn to the left of the boundary at "col". */
+    /** s[0, col) without the characters of collapsed literals */
+    private String visibleText(int line, int col) {
+        String s = lines.get(line);
+        if (line >= colorsByLine.size()) return s.substring(0, col);
+        StringBuilder sb = new StringBuilder();
+        int pos = 0;
+        for (ColorLit c : colorsByLine.get(line)) {
+            if (c.start() >= col) break;
+            if (!isCollapsed(c)) continue;
+            if (c.start() > pos) sb.append(s, pos, c.start());
+            pos = Math.max(pos, Math.min(c.end(), col));
+        }
+        if (pos < col) sb.append(s, pos, col);
+        return sb.toString();
+    }
+
+    /** the literal whose square is drawn directly before column "col", or null */
+    private ColorLit literalAt(int line, int col) {
+        if (line < 0 || line >= colorsByLine.size()) return null;
+        for (ColorLit c : colorsByLine.get(line)) if (c.start() == col) return c;
+        return null;
+    }
+
+    private boolean isExpanded(ColorLit c) {
+        if (pickerOpen && pickerLine == c.line() && pickerStart == c.start()) return true;
+        return isFocused() && cursorLine == c.line()
+                && cursorColumn >= c.start() && cursorColumn <= c.end();
+    }
+
+    /** collapsed = only the small box is visible (never in read-only editors, they can't click the box) */
+    private boolean isCollapsed(ColorLit c) {
+        return !readOnly && !isExpanded(c);
+    }
+
+    /** Number of inline squares drawn to the left of the boundary at "col". */
     private int swatchesBefore(int line, int col) {
         if (line < 0 || line >= colorsByLine.size()) return 0;
         int n = 0;
         for (ColorLit c : colorsByLine.get(line)) if (c.start() < col) n++;
         return n;
-    }
-
-    /** True if a colour square is drawn directly before the character at "col". */
-    private boolean hasSwatchAt(int line, int col) {
-        if (line < 0 || line >= colorsByLine.size()) return false;
-        for (ColorLit c : colorsByLine.get(line)) if (c.start() == col) return true;
-        return false;
     }
 
     private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -390,8 +460,30 @@ public class CodeEditorWidget extends AbstractWidget {
         enabledLibs = set;
     }
 
+    /** an allowed library OR a local .py file next to the program */
+    private boolean isKnownModule(String w) {
+        return enabledLibs.contains(w) || LocalModules.has(w);
+    }
+
     private boolean isModuleName(String w) {
-        return LanguageSpec.MODULES.contains(w) || enabledLibs.contains(w);
+        return LanguageSpec.MODULES.contains(w) || isKnownModule(w);
+    }
+
+    /** a module that comes from a local file (and is not a catalog library) */
+    private static boolean isLocalModule(String mod) {
+        return LocalModules.has(mod) && !LanguageSpec.MODULES.contains(mod);
+    }
+
+    private List<String> localParams(String name) {
+        List<String> p = LocalModules.params(name);          // "lib.add"
+        if (p != null) return p;
+        String q = importedNames.get(name);                  // "add" after "from lib import add"
+        return q == null ? null : LocalModules.params(q);
+    }
+
+    /** Call after LocalModules.update(...) so highlighting and completion pick up the new files. */
+    public void refreshLocalModules() {
+        rescan();
     }
 
     private void rescan() {
@@ -475,6 +567,12 @@ public class CodeEditorWidget extends AbstractWidget {
         int n = lines.size();
         foldEnd = new int[n];
         Arrays.fill(foldEnd, -1);
+
+        if (!pythonMode) {
+            folded.clear();
+            layoutRows();
+            return;
+        }
 
         Deque<Integer> stack = new ArrayDeque<>();
         int lastCode = -1;
@@ -675,14 +773,14 @@ public class CodeEditorWidget extends AbstractWidget {
                         alias = t.get(m + 1).text();
                         m += 2;
                     }
-                    if (enabledLibs.contains(mod)) moduleAliases.put(alias, mod);
+                    if (isKnownModule(mod)) moduleAliases.put(alias, mod);
                     k = m;
                     while (k < t.size() && !t.get(k).is(",")) k++;
                     k++;
                 }
             } else if (first.equals("from") && t.size() >= 4 && t.get(2).is("import")) {
                 String mod = t.get(1).text();
-                if (!enabledLibs.contains(mod)) continue;
+                if (!isKnownModule(mod)) continue;
                 for (int k = 3; k < t.size(); k++) {
                     Token tk = t.get(k);
                     if (tk.type() != Type.IDENT) continue;
@@ -698,11 +796,22 @@ public class CodeEditorWidget extends AbstractWidget {
                     && t.get(2).type() == Type.IDENT && t.get(3).is(".")
                     && t.get(4).type() == Type.IDENT && t.get(5).is("(")) {
                 String mod = resolveModule(t.get(2).text());
-                if (mod != null && LanguageSpec.PRELOADED_MODULES.contains(mod)) {
-                    String qualified = mod + "." + t.get(4).text();
-                    if (LanguageSpec.NATIVE_CLASSES.containsKey(qualified)) {
+                if (mod != null) {
+                    String name = t.get(4).text();
+                    String qualified = mod + "." + name;
+                    if (LanguageSpec.PRELOADED_MODULES.contains(mod) && LanguageSpec.NATIVE_CLASSES.containsKey(qualified)) {
+                        variableClasses.put(t.get(0).text(), qualified);
+                    } else if (LocalModules.isClass(mod, name)) {
                         variableClasses.put(t.get(0).text(), qualified);
                     }
+                }
+            } else if (t.size() >= 4 && t.get(0).type() == Type.IDENT && t.get(1).is("=")
+                    && t.get(2).type() == Type.IDENT && t.get(3).is("(")
+                    && importedNames.containsKey(t.get(2).text())) {
+                String q = importedNames.get(t.get(2).text());
+                int d = q.indexOf('.');
+                if (d > 0 && LocalModules.isClass(q.substring(0, d), q.substring(d + 1))) {
+                    variableClasses.put(t.get(0).text(), q);
                 }
             } else if (t.size() >= 4 && t.get(0).type() == Type.IDENT && t.get(1).is("=")
                     && t.get(2).type() == Type.IDENT && t.get(3).is("(")
@@ -945,9 +1054,9 @@ public class CodeEditorWidget extends AbstractWidget {
 
         // ---- popups ----
         g.pose().pushPose();
-        g.pose().translate(0, 0, 400);
+        g.pose().translate(0, 0, pickerOpen && pickerFreq ? 100 : 400);
         if (active) {
-            if (pickerOpen) drawPicker(g, f);
+            if (pickerOpen) drawPicker(g, f, mouseX, mouseY);
             else if (autocompleteOpen && !suggestions.isEmpty()) drawAutocomplete(g, f, mouseX, mouseY);
             else drawSignatureHelp(g, f);
         }
@@ -1008,24 +1117,33 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     private void drawLine(GuiGraphics g, Font f, int lineIdx, int x, int y, int clipL, int clipR) {
+        if (!pythonMode) {
+            g.drawString(f, lines.get(lineIdx), x, y, C_TEXT, false);
+            return;
+        }
         List<Token> toks = lineTokens.get(lineIdx);
         List<ColorLit> colors = lineIdx < colorsByLine.size() ? colorsByLine.get(lineIdx) : List.of();
 
         for (int ti = 0; ti < toks.size(); ti++) {
             Token t = toks.get(ti);
-            int w = f.width(t.text());
 
-            // colour square directly in front of a colour literal
-            for (ColorLit c : colors) {
-                if (c.start() == t.start()) {
-                    if (x + SWATCH_W > clipL && x < clipR) drawSwatch(g, x, y, c);
-                    x += SWATCH_W;
-                    break;
+            ColorLit lit = null;
+            for (ColorLit c : colors) if (c.start() == t.start()) { lit = c; break; }
+
+            if (lit != null) {
+                if (x + SWATCH_W > clipL && x < clipR) drawSwatch(g, x, y, lit);
+                x += SWATCH_W;
+                if (isCollapsed(lit)) {
+                    // skip every token of the literal, only the box stays
+                    while (ti + 1 < toks.size() && toks.get(ti + 1).start() < lit.end()) ti++;
+                    continue;
                 }
             }
 
+            int w = f.width(t.text());
             if (t.type() != Type.WHITESPACE && x + w > clipL && x < clipR) {
-                g.drawString(f, t.text(), x, y, colorFor(toks, ti, lineIdx), false);
+                if (isFString(t)) drawFString(g, f, t.text(), x, y);
+                else g.drawString(f, t.text(), x, y, colorFor(toks, ti, lineIdx), false);
 
                 if (hoveredHelpWord != null && hoveredHelpWord.line() == lineIdx
                         && hoveredHelpWord.startColumn() == t.start()
@@ -1037,7 +1155,63 @@ public class CodeEditorWidget extends AbstractWidget {
         }
     }
 
+    // ---------------------------------------------------------------- f-strings
+    /**
+     * True for a string token whose prefix contains f / F (f"..", rf"..", Fr'..').
+     * The lexer keeps the prefix inside the STRING token. Continuation lines of a triple quoted
+     * string have no prefix and are therefore drawn as normal strings.
+     */
+    private static boolean isFString(Token t) {
+        if (t.type() != Type.STRING) return false;
+        String s = t.text();
+        boolean f = false;
+        for (int i = 0; i < s.length() && i < 3; i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\'') return f;
+            if ("rRbBuUfF".indexOf(c) < 0) return false;
+            if (c == 'f' || c == 'F') f = true;
+        }
+        return false;
+    }
+
+    /** Draws an f-string: text in string colour, replacement fields {expr} in text colour with blue braces. */
+    private void drawFString(GuiGraphics g, Font f, String s, int x, int y) {
+        int len = s.length();
+        int[] col = new int[len];
+        int depth = 0;
+
+        for (int i = 0; i < len; i++) {
+            char c = s.charAt(i);
+            if (depth == 0 && (c == '{' || c == '}') && i + 1 < len && s.charAt(i + 1) == c) {
+                col[i] = C_STRING;            // {{ and }} are literal braces
+                col[i + 1] = C_STRING;
+                i++;
+                continue;
+            }
+            if (c == '{') {
+                col[i] = C_FSTRING_BRACE;
+                depth++;
+            } else if (c == '}' && depth > 0) {
+                depth--;
+                col[i] = C_FSTRING_BRACE;
+            } else {
+                col[i] = depth > 0 ? C_TEXT : C_STRING;
+            }
+        }
+
+        int start = 0;
+        while (start < len) {
+            int end = start + 1;
+            while (end < len && col[end] == col[start]) end++;
+            String piece = s.substring(start, end);
+            g.drawString(f, piece, x, y, col[start], false);
+            x += f.width(piece);
+            start = end;
+        }
+    }
+
     private void drawBracketMatch(GuiGraphics g, Font f) {
+        if (!pythonMode) return;
         long k = -1;
         for (int c : new int[]{cursorColumn - 1, cursorColumn}) {
             if (c >= 0 && bracketPair.containsKey(key(cursorLine, c))) { k = key(cursorLine, c); break; }
@@ -1059,7 +1233,21 @@ public class CodeEditorWidget extends AbstractWidget {
     private void drawSwatch(GuiGraphics g, int x, int y, ColorLit c) {
         boolean active = (pickerOpen && pickerLine == c.line() && pickerStart == c.start()) || c.equals(hoverSwatch);
         g.fill(x, y, x + 9, y + 9, active ? 0xFFFFFFFF : 0xFF6B6B6B);
-        g.fill(x + 1, y + 1, x + 8, y + 8, 0xFF000000 | c.rgb());
+
+        if (!c.freq()) {
+            g.fill(x + 1, y + 1, x + 8, y + 8, 0xFF000000 | c.rgb());
+            return;
+        }
+
+        // frequency: dark square with a small antenna
+        g.fill(x + 1, y + 1, x + 8, y + 8, 0xFF2D2D30);
+        int a = 0xFF4FC1FF;
+        g.fill(x + 4, y + 2, x + 5, y + 7, a);   // mast
+        g.fill(x + 3, y + 7, x + 6, y + 8, a);   // base
+        g.fill(x + 2, y + 2, x + 3, y + 4, a);   // inner waves
+        g.fill(x + 6, y + 2, x + 7, y + 4, a);
+        g.fill(x + 1, y + 1, x + 2, y + 5, a);   // outer waves
+        g.fill(x + 7, y + 1, x + 8, y + 5, a);
     }
 
     private void drawFoldArrow(GuiGraphics g, int cx, int cy, boolean collapsed) {
@@ -1175,11 +1363,16 @@ public class CodeEditorWidget extends AbstractWidget {
 
         if ((p.equals("import") || p.equals("from")) && isModuleName(w)) return C_CLASS;
 
-        // member access:  math.sqrt   hud.Label   label.text
+        // member access:  math.sqrt   hud.Label   label.text   lib.add
         if (p.equals(".")) {
             String recv = receiverBefore(toks, i);
             String mod = recv == null ? null : resolveModule(recv);
             if (mod != null) {
+                if (isLocalModule(mod)) {
+                    if (LocalModules.isClass(mod, w)) return C_CLASS;
+                    if (LocalModules.params(mod + "." + w) != null) return C_FUNCTION;
+                    return C_VARIABLE;
+                }
                 String q = mod + "." + w;
                 if (LanguageSpec.NATIVE_CLASSES.containsKey(q)) return C_CLASS;
                 if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(q)) return C_FUNCTION;
@@ -1194,6 +1387,14 @@ public class CodeEditorWidget extends AbstractWidget {
         if (imported != null) {
             if (LanguageSpec.NATIVE_CLASSES.containsKey(imported)) return C_CLASS;
             if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(imported)) return C_FUNCTION;
+            int d = imported.indexOf('.');
+            if (d > 0 && isLocalModule(imported.substring(0, d))) {
+                String lm = imported.substring(0, d);
+                String name = imported.substring(d + 1);
+                if (LocalModules.isClass(lm, name)) return C_CLASS;
+                if (LocalModules.params(imported) != null) return C_FUNCTION;
+                return C_VARIABLE;
+            }
             return C_CONSTANT;
         }
 
@@ -1739,6 +1940,12 @@ public class CodeEditorWidget extends AbstractWidget {
         String before = line.substring(0, col);
         String baseIndent = leadingSpaces(line);
 
+        if (!pythonMode) {
+            replaceRange(cursorLine, col, cursorLine, col, "\n" + baseIndent);
+            closeAutocomplete();
+            return;
+        }
+
         List<Token> bt = PyLexer.significant(PyLexer.lex(before, lineStart[cursorLine]).tokens());
         String lastTok = bt.isEmpty() ? "" : bt.get(bt.size() - 1).text();
         String firstWord = (!bt.isEmpty() && bt.get(0).type() == Type.IDENT) ? bt.get(0).text() : "";
@@ -1853,6 +2060,10 @@ public class CodeEditorWidget extends AbstractWidget {
 
     @Override
     public boolean charTyped(char c, int modifiers) {
+        if (!pythonMode) {
+            insertAtCursor(String.valueOf(c), isWordChar(c) ? KIND_TYPE : KIND_NONE);
+            return true;
+        }
         if (readOnly || !isFocused()) return false;
         if (c < 32 || c == 127) return false;
 
@@ -1985,14 +2196,21 @@ public class CodeEditorWidget extends AbstractWidget {
         String s = lines.get(line);
         int relX = (int) mouseX - textOrigin();
 
-        int col = 0;
-        int acc = 0;
-        for (int i = 0; i < s.length(); i++) {
-            int sw = hasSwatchAt(line, i) ? SWATCH_W : 0;
+        int col = 0, acc = 0, i = 0;
+        while (i < s.length()) {
+            ColorLit c = literalAt(line, i);
+            if (c != null && isCollapsed(c)) {
+                if (relX < acc + SWATCH_W / 2) break;
+                acc += SWATCH_W;
+                i = c.end();
+                col = i;
+                continue;
+            }
+            int sw = c != null ? SWATCH_W : 0;
             int w = f.width(String.valueOf(s.charAt(i)));
             if (relX < acc + sw + w / 2) break;
             acc += sw + w;
-            col = i + 1;
+            col = ++i;
         }
         return new int[]{line, col};
     }
@@ -2007,12 +2225,13 @@ public class CodeEditorWidget extends AbstractWidget {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // ---- colour swatches + picker ----
+        // ---- swatches + popups (colour picker / frequency popup) ----
         if (button == 0 && !readOnly) {
             if (pickerOpen) {
                 int[] r = pickerRect();
                 boolean inside = mouseX >= r[0] && mouseX <= r[0] + r[2] && mouseY >= r[1] && mouseY <= r[1] + r[3];
                 if (inside) {
+                    if (pickerFreq) return freqClick(mouseX, mouseY, button, r);   // empty frequency popup: just swallow the click
                     int svx = r[0] + 6, svy = r[1] + 6, hx = r[0] + 102;
                     if (mouseX >= svx && mouseX < svx + PK_SV_W && mouseY >= svy && mouseY < svy + PK_SV_H) {
                         pickerDrag = 1;
@@ -2232,6 +2451,7 @@ public class CodeEditorWidget extends AbstractWidget {
     // HELP LOOKUP (ctrl + hover)
     // =====================================================================
     private HelpWordHit getHelpWordAt(double mouseX, double mouseY) {
+        if (!pythonMode) return null;
         int relY = (int) mouseY - getY() - 5 + scrollY;
         if (relY < 0) return null;
         int helpRow = relY / LH;
@@ -2249,7 +2469,15 @@ public class CodeEditorWidget extends AbstractWidget {
         int acc = 0;
         int column = line.length();
         for (int i = 0; i < line.length(); i++) {
-            if (hasSwatchAt(lineIndex, i)) acc += SWATCH_W;
+            ColorLit lc = literalAt(lineIndex, i);
+            if (lc != null) {
+                acc += SWATCH_W;
+                if (isCollapsed(lc)) {
+                    if (acc > relX) return null;     // mouse is over a collapsed box
+                    i = lc.end() - 1;                // skip the hidden text
+                    continue;
+                }
+            }
             acc += f.width(String.valueOf(line.charAt(i)));
             if (acc > relX) { column = i; break; }
         }
@@ -2264,10 +2492,7 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     // =====================================================================
-    // AUTOCOMPLETE
-    // =====================================================================
-    // =====================================================================
-    // COLOUR LITERALS + PICKER
+    // COLOUR + FREQUENCY LITERALS, PICKER
     // =====================================================================
     private static boolean isHex(String s, int from, int to) {
         for (int i = from; i < to; i++) {
@@ -2282,15 +2507,33 @@ public class CodeEditorWidget extends AbstractWidget {
 
         if (t.type() == Type.NUMBER && s.length() == 8 && s.charAt(0) == '0'
                 && (s.charAt(1) == 'x' || s.charAt(1) == 'X') && isHex(s, 2, 8)) {
-            return new ColorLit(line, t.start(), t.end(), Integer.parseInt(s.substring(2), 16));
+            return new ColorLit(line, t.start(), t.end(), Integer.parseInt(s.substring(2), 16), false);
         }
 
         if (t.type() == Type.STRING && !t.unterminated() && s.length() == 9
                 && (s.charAt(0) == '"' || s.charAt(0) == '\'') && s.charAt(8) == s.charAt(0)
                 && s.charAt(1) == '#' && isHex(s, 2, 8)) {
-            return new ColorLit(line, t.start(), t.end(), Integer.parseInt(s.substring(2, 8), 16));
+            return new ColorLit(line, t.start(), t.end(), Integer.parseInt(s.substring(2, 8), 16), false);
         }
         return null;
+    }
+
+    /** a plain quoted string (no prefix) that is empty or "something:something" */
+    private static boolean isFreqString(Token t) {
+        if (t.type() != Type.STRING || t.unterminated()) return false;
+        String s = t.text();
+        if (s.length() < 2) return false;
+        char q = s.charAt(0);
+        if ((q != '"' && q != '\'') || s.charAt(s.length() - 1) != q) return false;   // also rejects prefixed strings
+        return FREQ_ID.matcher(s.substring(1, s.length() - 1)).matches();
+    }
+
+    /** ["a:b", "c:d"] starting at the '[' token with index i of the significant tokens. */
+    private ColorLit parseFreq(int line, List<Token> sig, int i) {
+        if (i + 4 >= sig.size()) return null;
+        if (!sig.get(i).is("[") || !sig.get(i + 2).is(",") || !sig.get(i + 4).is("]")) return null;
+        if (!isFreqString(sig.get(i + 1)) || !isFreqString(sig.get(i + 3))) return null;
+        return new ColorLit(line, sig.get(i).start(), sig.get(i + 4).end(), 0, true);
     }
 
     private void scanColors() {
@@ -2299,16 +2542,30 @@ public class CodeEditorWidget extends AbstractWidget {
 
         for (int i = 0; i < lines.size(); i++) {
             List<ColorLit> list = new ArrayList<>();
-            for (Token t : lineTokens.get(i)) {
-                ColorLit c = parseColor(i, t);
-                if (c != null) list.add(c);
+
+            if (pythonMode) {
+                for (Token t : lineTokens.get(i)) {
+                    ColorLit c = parseColor(i, t);
+                    if (c != null) list.add(c);
+                }
+
+                // lines that start inside a multi-line string contain no real code
+                if (lineStart[i] == PyLexer.State.NONE) {
+                    List<Token> sig = PyLexer.significant(lineTokens.get(i));
+                    for (int k = 0; k < sig.size(); k++) {
+                        ColorLit fr = parseFreq(i, sig, k);
+                        if (fr != null) list.add(fr);
+                    }
+                }
             }
+
+            list.sort(Comparator.comparingInt(ColorLit::start));
             colorsByLine.add(list);
             maxColorsPerLine = Math.max(maxColorsPerLine, list.size());
         }
     }
 
-    /** The colour square under the mouse (it sits directly in front of the colour literal). */
+    /** The square under the mouse (it sits directly in front of the literal). */
     private ColorLit swatchAt(double mx, double my) {
         if (readOnly || colorsByLine.isEmpty()) return null;
         if (mx < textLeft() || mx >= getX() + width - SB) return null;
@@ -2372,10 +2629,29 @@ public class CodeEditorWidget extends AbstractWidget {
     private void openPicker(ColorLit c) {
         closeAutocomplete();
 
-        String src = lines.get(c.line()).substring(c.start(), c.end());
         pickerLine = c.line();
         pickerStart = c.start();
         pickerEnd = c.end();
+        pickerFreq = c.freq();
+        pickerUndoDone = false;
+        pickerDrag = 0;
+
+        freqActive = 0;
+
+        clearSelection();
+        cursorLine = c.line();
+        cursorColumn = c.end();
+        desiredColumn = -1;
+        ensureCursorVisible();
+        resetBlink();
+
+        if (pickerFreq) {
+            // frequency popup: same window as the colour picker, content comes later
+            pickerOpen = true;
+            return;
+        }
+
+        String src = lines.get(c.line()).substring(c.start(), c.end());
         pickerString = src.charAt(0) == '"' || src.charAt(0) == '\'';
         pickerQuote = pickerString ? src.charAt(0) : 0;
         pickerPrefix = pickerString ? "#" : src.substring(0, 2);
@@ -2384,18 +2660,18 @@ public class CodeEditorWidget extends AbstractWidget {
         pickerLower = digits.chars().anyMatch(ch -> ch >= 'a' && ch <= 'f');
 
         setPickerFromRgb(c.rgb());
-        pickerUndoDone = false;
-        pickerDrag = 0;
         pickerOpen = true;
     }
 
     private int[] pickerRect() {
+        int w = pickerFreq ? FQ_W : PK_W;
+        int h = pickerFreq ? FQ_H : PK_H;
         int anchor = pickerLine < lines.size() ? xOf(pickerLine, pickerStart) - 4 : getX() + 2;
-        int x = Math.max(textLeft(), Math.min(anchor, getX() + width - SB - PK_W - 2));
+        int x = Math.max(textLeft(), Math.min(anchor, getX() + width - SB - w - 2));
         int y = lineTop(pickerLine) + LH + 3;
-        if (y + PK_H > getY() + height) y = lineTop(pickerLine) - PK_H - 3;
-        y = Math.max(getY() + 2, Math.min(y, getY() + height - PK_H - 2));
-        return new int[]{x, y, PK_W, PK_H};
+        if (y + h > getY() + height) y = lineTop(pickerLine) - h - 3;
+        y = Math.max(getY() + 2, Math.min(y, getY() + height - h - 2));
+        return new int[]{x, y, w, h};
     }
 
     private static float clamp01(double v) { return (float) Math.max(0, Math.min(1, v)); }
@@ -2413,6 +2689,7 @@ public class CodeEditorWidget extends AbstractWidget {
 
     /** Writes the chosen colour back into the source text (same length, so the cursor never moves). */
     private void pickerApply() {
+        if (pickerFreq) return;
         if (pickerLine >= lines.size()) { closeAutocomplete(); return; }
         String line = lines.get(pickerLine);
         if (pickerStart > pickerEnd || pickerEnd > line.length()) { closeAutocomplete(); return; }
@@ -2429,13 +2706,15 @@ public class CodeEditorWidget extends AbstractWidget {
         rescan();
     }
 
-    private void drawPicker(GuiGraphics g, Font f) {
+    private void drawPicker(GuiGraphics g, Font f, int m_x, int m_y) {
         if (pickerLine >= lines.size()) return;
 
         int[] r = pickerRect();
         int x = r[0], y = r[1];
-        g.fill(x, y, x + PK_W, y + PK_H, C_POPUP_BG);
-        g.renderOutline(x, y, PK_W, PK_H, C_POPUP_BORDER);
+        g.fill(x, y, x + r[2], y + r[3], C_POPUP_BG);
+        g.renderOutline(x, y, r[2], r[3], C_POPUP_BORDER);
+
+        if (pickerFreq) { drawFreqPopup(g, f, r, m_x, m_y); return; }
 
         int svx = x + 6, svy = y + 6;
         for (int i = 0; i < PK_SV_W; i++) {
@@ -2467,11 +2746,15 @@ public class CodeEditorWidget extends AbstractWidget {
         g.drawString(f, String.format("#%06X", rgb), x + 28, y + 96, C_POPUP_TEXT, false);
     }
 
-    /** True while the suggestion list OR the colour picker is open (so Esc closes it first). */
+    // =====================================================================
+    // AUTOCOMPLETE
+    // =====================================================================
+    /** True while the suggestion list OR the colour picker / frequency popup is open (so Esc closes it first). */
     public boolean isAutocompleteOpen() { return autocompleteOpen || pickerOpen; }
 
     public void closeAutocomplete() {
         pickerOpen = false;
+        pickerFreq = false;
         pickerDrag = 0;
         autocompleteOpen = false;
         suggestions.clear();
@@ -2491,7 +2774,40 @@ public class CodeEditorWidget extends AbstractWidget {
         if (r.endState() != PyLexer.State.NONE) return true;
         if (r.tokens().isEmpty()) return false;
         Token last = r.tokens().get(r.tokens().size() - 1);
-        return last.type() == Type.COMMENT || (last.type() == Type.STRING && last.unterminated());
+        if (last.type() == Type.COMMENT) return true;
+        if (last.type() == Type.STRING && last.unterminated()) return !inFStringExpression(last.text());
+        return false;
+    }
+
+    /** true if the (unterminated) string text ends inside a {expression} of an f-string */
+    private static boolean inFStringExpression(String s) {
+        int q = 0;
+        boolean f = false;
+        while (q < s.length() && "rRbBuUfF".indexOf(s.charAt(q)) >= 0) {
+            if (s.charAt(q) == 'f' || s.charAt(q) == 'F') f = true;
+            q++;
+        }
+        if (!f || q >= s.length()) return false;
+        char quote = s.charAt(q);
+        if (quote != '"' && quote != '\'') return false;
+
+        int i = s.startsWith("" + quote + quote + quote, q) ? q + 3 : q + 1;
+        int depth = 0;
+        char inner = 0;                       // a nested 'string' inside the expression
+
+        for (; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (depth == 0) {
+                if ((c == '{' || c == '}') && i + 1 < s.length() && s.charAt(i + 1) == c) { i++; continue; } // {{ }}
+                if (c == '{') depth++;
+                continue;
+            }
+            if (inner != 0) { if (c == inner) inner = 0; continue; }
+            if (c == '\'' || c == '"') inner = c;
+            else if (c == '{') depth++;
+            else if (c == '}') depth--;
+        }
+        return depth > 0 && inner == 0;
     }
 
     private String getCurrentWord() {
@@ -2517,6 +2833,7 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     private void updateAutocomplete(boolean force) {
+        if (!pythonMode) { closeAutocomplete(); return; }
         closeAutocomplete();
         suppressSuffix = false;
         if (readOnly || insideStringOrComment()) return;
@@ -2538,11 +2855,14 @@ public class CodeEditorWidget extends AbstractWidget {
             List<Candidate> cands = new ArrayList<>();
             boolean afterImport = firstWord.equals("from") && prefix.stream().anyMatch(t -> t.is("import"));
 
-            if (afterImport && prefix.size() > 1 && enabledLibs.contains(prefix.get(1).text())) {
+            if (afterImport && prefix.size() > 1 && isKnownModule(prefix.get(1).text())) {
                 String mod = prefix.get(1).text();
                 for (String m : LanguageSpec.moduleMembers(mod)) cands.add(memberCandidate(mod, m));
             } else {
                 for (String m : enabledLibs) cands.add(new Candidate(m, Kind.MODULE, "module"));
+                for (String m : LocalModules.names()) {
+                    if (!enabledLibs.contains(m)) cands.add(new Candidate(m, Kind.MODULE, "local file"));
+                }
             }
             suppressSuffix = true;
             filterAndOpen(cands, word);
@@ -2568,6 +2888,12 @@ public class CodeEditorWidget extends AbstractWidget {
                     for (String fld : LanguageSpec.nativeClassFields(cls)) {
                         cands.add(new Candidate(fld, fld.equals("remove") ? Kind.FUNCTION : Kind.PROPERTY, "hud object"));
                     }
+                } else if (cls != null && cls.contains(".")
+                        && LocalModules.isClass(cls.substring(0, cls.indexOf('.')), cls.substring(cls.indexOf('.') + 1))) {
+                    String lm = cls.substring(0, cls.indexOf('.'));
+                    String lc = cls.substring(cls.indexOf('.') + 1);
+                    for (String m : LocalModules.classMethods(lm, lc)) cands.add(new Candidate(m, Kind.FUNCTION, lc));
+                    for (String fld : LocalModules.classFields(lm, lc)) cands.add(new Candidate(fld, Kind.PROPERTY, lc));
                 } else if (cls != null) {
                     for (String m : classMethodNames.getOrDefault(cls, Set.of())) {
                         if (!m.startsWith("__")) cands.add(new Candidate(m, Kind.FUNCTION, cls));
@@ -2591,6 +2917,11 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     private Candidate memberCandidate(String module, String name) {
+        if (isLocalModule(module)) {
+            if (LocalModules.isClass(module, name)) return new Candidate(name, Kind.CLASS, module);
+            if (LocalModules.params(module + "." + name) != null) return new Candidate(name, Kind.FUNCTION, module);
+            return new Candidate(name, Kind.VARIABLE, module);
+        }
         if (LanguageSpec.CLASS_MODULES.getOrDefault(module, Map.of()).containsKey(name)) {
             return new Candidate(name, Kind.CLASS, module);
         }
@@ -2605,7 +2936,8 @@ public class CodeEditorWidget extends AbstractWidget {
 
         // keyword arguments of the call we are inside (only for user functions, see flag)
         if (call != null) {
-            boolean user = info.functions().containsKey(call.name()) || ctorParams.containsKey(call.name());
+            boolean user = info.functions().containsKey(call.name()) || ctorParams.containsKey(call.name())
+                    || localParams(call.name()) != null;
             boolean allowed = user || (SUGGEST_NAMED_ARGS_FOR_API && !LanguageSpec.isPositionalOnly(call.name()));
             List<String> params = allowed ? paramsFor(call.name()) : null;
             if (params != null) {
@@ -2626,8 +2958,15 @@ public class CodeEditorWidget extends AbstractWidget {
         }
         for (Map.Entry<String, String> e : importedNames.entrySet()) {
             String q = e.getValue();
-            Kind k = LanguageSpec.NATIVE_CLASSES.containsKey(q) ? Kind.CLASS
-                    : LanguageSpec.BUILTIN_FUNCTIONS.containsKey(q) ? Kind.FUNCTION : Kind.CONSTANT;
+            int d = q.indexOf('.');
+            Kind k;
+            if (d > 0 && isLocalModule(q.substring(0, d))) {
+                k = LocalModules.isClass(q.substring(0, d), q.substring(d + 1)) ? Kind.CLASS
+                        : LocalModules.params(q) != null ? Kind.FUNCTION : Kind.VARIABLE;
+            } else {
+                k = LanguageSpec.NATIVE_CLASSES.containsKey(q) ? Kind.CLASS
+                        : LanguageSpec.BUILTIN_FUNCTIONS.containsKey(q) ? Kind.FUNCTION : Kind.CONSTANT;
+            }
             out.putIfAbsent(e.getKey(), new Candidate(e.getKey(), k, q));
         }
         for (String kw : LanguageSpec.KEYWORD_NAMES) out.putIfAbsent(kw, new Candidate(kw, Kind.KEYWORD, "keyword"));
@@ -2884,12 +3223,15 @@ public class CodeEditorWidget extends AbstractWidget {
         if (p != null) return p;
         p = LanguageSpec.NATIVE_CLASSES.get(name);
         if (p != null) return p;
+        p = LocalModules.params(name);                  // "lib.add(" and "lib.Vec("
+        if (p != null) return p;
         String q = importedNames.get(name);
         if (q != null && !q.equals(name)) return paramsFor(q);
         return methodParams.get(name);                   // obj.method(  /  self.method(
     }
 
     private void drawSignatureHelp(GuiGraphics g, Font f) {
+        if (!pythonMode) return;
         String line = lines.get(cursorLine);
         int col = Math.min(cursorColumn, line.length());
         CallContext ctx = findCallContext(line, col);
@@ -2937,5 +3279,99 @@ public class CodeEditorWidget extends AbstractWidget {
             }
         }
         g.drawString(f, ")", tx, ty, C_POPUP_TEXT, false);
+    }
+
+    // ---------------------------------------------------------------- frequency popup
+    private static ItemStack stringToItem(String id) {
+        if (id == null || id.isBlank()) return ItemStack.EMPTY;
+        ResourceLocation loc = ResourceLocation.tryParse(id);
+        if (loc == null || !BuiltInRegistries.ITEM.containsKey(loc)) return ItemStack.EMPTY;
+        Item item = BuiltInRegistries.ITEM.get(loc);
+        return item == Items.AIR ? ItemStack.EMPTY : new ItemStack(item);
+    }
+
+    private static String itemToString(ItemStack s) {
+        return s.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
+    }
+
+    /** the two items currently written in the open literal */
+    private ItemStack[] freqItems() {
+        ItemStack[] out = {ItemStack.EMPTY, ItemStack.EMPTY};
+        if (pickerLine >= lines.size()) return out;
+        String line = lines.get(pickerLine);
+        if (pickerStart > pickerEnd || pickerEnd > line.length()) return out;
+
+        List<Token> sig = PyLexer.significant(PyLexer.lex(line.substring(pickerStart, pickerEnd)));
+        if (sig.size() == 5) {
+            for (int k = 0; k < 2; k++) {
+                String s = sig.get(1 + k * 2).text();
+                if (s.length() >= 2) out[k] = stringToItem(s.substring(1, s.length() - 1));
+            }
+        }
+        return out;
+    }
+
+    /** writes the new pair into the source text */
+    private void setFreqItem(int index, ItemStack stack) {
+        ItemStack[] cur = freqItems();
+        cur[index] = stack.isEmpty() ? ItemStack.EMPTY : stack.copyWithCount(1);
+        String text = "[\"" + itemToString(cur[0]) + "\", \"" + itemToString(cur[1]) + "\"]";
+
+        recordUndo(KIND_NONE);
+        replaceRange(pickerLine, pickerStart, pickerLine, pickerEnd, text);
+        pickerEnd = pickerStart + text.length();      // the literal changed length
+    }
+
+    private void freqPress(int i) {
+        freqActive = i;
+        ItemStack carried = carriedSupplier.get();
+        if (!carried.isEmpty()) setFreqItem(i, carried);     // item on the cursor -> this slot
+    }
+
+    /** returns false for the inventory part so the screen's real slots get the click */
+    private boolean freqClick(double mx, double my, int button, int[] r) {
+        if (my >= r[1] + 46) return false;
+
+        for (int i = 0; i < 2; i++) {
+            ItemIconButton b = freqButtons[i];
+            if (b == null || !b.isMouseOver(mx, my)) continue;
+            if (button == 1) {                                // right click clears
+                freqActive = i;
+                setFreqItem(i, ItemStack.EMPTY);
+            } else {
+                b.mouseClicked(mx, my, button);               // plays the click sound, calls freqPress
+            }
+            return true;
+        }
+        return true;                                          // swallow clicks on the popup background
+    }
+
+    private void drawFreqPopup(GuiGraphics g, Font f, int[] r, int mx, int my) {
+        g.drawString(f, "Frequency", r[0] + 6, r[1] + 6, C_POPUP_TEXT, false);
+
+        ItemStack[] cur = freqItems();
+        for (int i = 0; i < 2; i++) {
+            int bx = r[0] + FQ_W / 2 - 21 + i * 24;
+            int by = r[1] + 20;
+            final int slot = i;
+
+            ItemIconButton b = new ItemIconButton(bx, by, cur[i], btn -> freqPress(slot));
+            freqButtons[i] = b;
+
+            if (i == freqActive) g.renderOutline(bx - 1, by - 1, 20, 20, 0xFF4FC1FF);
+            b.render(g, mx, my, 0);
+        }
+
+        g.fill(r[0] + 6, r[1] + 42, r[0] + r[2] - 6, r[1] + 43, C_POPUP_BORDER);
+
+        // cell backgrounds only, the items and tooltips come from the real slots
+        int ox = r[0] + 6;
+        int oy = r[1] + 48;
+        for (int i = 0; i < 36; i++) {
+            int col = i < 27 ? i % 9 : i - 27;
+            int y = i < 27 ? oy + (i / 9) * 18 : oy + 58;
+            g.fill(ox + col * 18, y, ox + col * 18 + 18, y + 18, 0xFF555555);
+            g.fill(ox + col * 18 + 1, y + 1, ox + col * 18 + 17, y + 17, 0xFF2B2B2B);
+        }
     }
 }

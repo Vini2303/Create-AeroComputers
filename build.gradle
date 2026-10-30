@@ -135,21 +135,37 @@ dependencies {
     implementation("net.createmod.ponder:ponder-neoforge:1.0.82+mc1.21.1")
 
     // GraalPy
-    jarJar(implementation("org.graalvm.polyglot:polyglot:25.3.4.1")) {
-        version {
-            prefer "25.3.4.1"
-        }
-    }
+    def graalVersion = "25.3.4.1"
 
-    jarJar(implementation("org.graalvm.python:python-embedding:25.3.4.1")) {
-        version {
-            prefer "25.3.4.1"
-        }
-    }
+    def graalDependencies = [
+            "org.graalvm.polyglot:polyglot",
+            "org.graalvm.python:python-embedding",
+            "org.graalvm.python:python",
+            "org.graalvm.python:python-language",
+            "org.graalvm.python:python-resources",
+            "org.graalvm.sdk:nativeimage",
+            "org.graalvm.sdk:word",
+            "org.graalvm.sdk:collections",
+            "org.graalvm.sdk:jniutils",
+            "org.graalvm.truffle:truffle-api",
+            "org.graalvm.truffle:truffle-runtime",
+            "org.graalvm.truffle:truffle-compiler",
+            "org.graalvm.regex:regex",
+            "org.graalvm.tools:profiler-tool",
+            "org.graalvm.shadowed:json",
+            "org.graalvm.shadowed:icu4j",
+            "org.graalvm.shadowed:xz"
+    ]
 
-// Required for Minecraft 1.21.1 development runs
-    additionalRuntimeClasspath("org.graalvm.polyglot:polyglot:25.3.4.1")
-    additionalRuntimeClasspath("org.graalvm.python:python-embedding:25.3.4.1")
+    graalDependencies.each { dependency ->
+        jarJar(implementation("${dependency}:${graalVersion}")) {
+            version {
+                prefer graalVersion
+            }
+        }
+
+        additionalRuntimeClasspath("${dependency}:${graalVersion}")
+    }
 
     // GEÄNDERT: Von compileOnly zu implementation gewechselt
     implementation files("run/mods/create-1.21.1-6.0.10.jar")

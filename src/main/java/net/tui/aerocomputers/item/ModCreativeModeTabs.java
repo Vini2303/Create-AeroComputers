@@ -23,11 +23,19 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.HUD_HELMET);
                         output.accept(ModBlocks.HUDDISPLAY);
                         output.accept(ModBlocks.WEAPONLINKER);
+                        output.accept(ModBlocks.SENSORBLOCK);
+                        output.accept(ModBlocks.DIGITALTRANSMISSIONBLOCK);
+                        output.accept(ModBlocks.CAMERABLOCK);
 
                         output.accept(ModBlocks.TRANSFORMIUM);
                         output.accept(ModBlocks.TRANSFORMIUMORE);
                         output.accept(ModItems.RAW_TRANSFORMIUM);
                         output.accept(ModItems.TRANSFORMIUM_INGOT);
+
+                        output.accept(ModBlocks.CALCITE_CASING);
+                        output.accept(ModItems.CALCITE_ALLOY);
+                        output.accept(ModItems.CALCITE_POWDER);
+                        output.accept(ModItems.COMPUTING_MECHANISM);
 
                     }).build());
 
