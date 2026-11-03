@@ -27,10 +27,8 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.tui.aerocomputers.AeroComputers;
-import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
-import net.tui.aerocomputers.block.entity.HudDisplayBlockEntity;
-import net.tui.aerocomputers.block.entity.ModBlockEntitys;
-import net.tui.aerocomputers.block.entity.WeaponLinkerBlockEntity;
+import net.tui.aerocomputers.block.entity.*;
+import net.tui.aerocomputers.client.ShiftDown;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -61,21 +59,6 @@ public class WeaponLinkerBlock extends HorizontalDirectionalBlock implements Ent
         return var10000;
     }
 
-    @Nullable
-    @Override
-    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        if (type != ModBlockEntitys.WEAPONLINKER_BE.get()) {
-            return null;
-        }
-        return (level2, pos, st, be) -> {
-            if (be instanceof WeaponLinkerBlockEntity bce) {
-                bce.tick();
-            }
-        };
-    }
-
-
-
 
     @Override
     protected MapCodec<? extends WeaponLinkerBlock> codec() {
@@ -105,19 +88,45 @@ public class WeaponLinkerBlock extends HorizontalDirectionalBlock implements Ent
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
         if (level.getBlockEntity(pos) instanceof WeaponLinkerBlockEntity weaponLinerBlockEntity)
             if (!level.isClientSide) {
-                ((ServerPlayer) player).openMenu(new SimpleMenuProvider(weaponLinerBlockEntity, Component.literal("Set Board Computer")), pos);
-                AeroComputers.LOGGER.info("open WeaponLinker Display");
+                ((ServerPlayer) player).openMenu(new SimpleMenuProvider(weaponLinerBlockEntity, Component.literal("Set Freq")), pos);
             }
         return InteractionResult.SUCCESS;
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-        if(true) {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.weapon_linker_shift"));
+    public void appendHoverText(
+            ItemStack stack,
+            Item.TooltipContext context,
+            List<Component> tooltipComponents,
+            TooltipFlag tooltipFlag
+    ) {
+        if (ShiftDown.isDown()) {
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.weapon_linker_shift")
+            );
         } else {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.pressshift"));
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.pressshift")
+            );
         }
+
         super.appendHoverText(stack, context, tooltipComponents, tooltipFlag);
+    }
+
+    @Nullable
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(
+            Level level,
+            BlockState state,
+            BlockEntityType<T> type
+    ) {
+        if (type != ModBlockEntitys.WEAPONLINKER_BE.get())
+            return null;
+
+        return (level2, pos, st, be) -> {
+            if (be instanceof WeaponLinkerBlockEntity linker) {
+                linker.tick();
+            }
+        };
     }
 }

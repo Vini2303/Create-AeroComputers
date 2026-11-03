@@ -1,14 +1,21 @@
 package net.tui.aerocomputers;
 
+import com.simibubi.create.content.schematics.SchematicAndQuillItem;
+import com.simibubi.create.content.schematics.client.SchematicAndQuillHandler;
+import com.simibubi.create.content.schematics.client.SchematicRenderer;
+import dev.ryanhcode.sable.neoforge.mixin.compatibility.create.schematics.SchematicAndQuillHandlerMixin;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.tui.aerocomputers.block.ModBlocks;
-import net.tui.aerocomputers.block.entity.ComputerRegistry;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
+import net.tui.aerocomputers.block.entity.WeaponLinkerBlockEntity;
 import net.tui.aerocomputers.config.AeroComputersConfig;
 import net.tui.aerocomputers.item.ModCreativeModeTabs;
 import net.tui.aerocomputers.item.ModItems;
 import net.tui.aerocomputers.network.ModNetworking;
+import net.tui.aerocomputers.registries.DigitalTransmissionRegistry;
+import net.tui.aerocomputers.registries.HudRegistry;
 import net.tui.aerocomputers.registries.SensorRegistry;
+import net.tui.aerocomputers.registries.WeaponLinkerRegistry;
 import net.tui.aerocomputers.screen.ModMenuTypes;
 import org.slf4j.Logger;
 
@@ -67,7 +74,11 @@ public class AeroComputers {
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent event) {
-        ComputerRegistry.clear();
         SensorRegistry.clear();
+        HudRegistry.clear();
+        DigitalTransmissionRegistry.clear();
+        WeaponLinkerRegistry.clear();
     }
+
+    SchematicRenderer
 }

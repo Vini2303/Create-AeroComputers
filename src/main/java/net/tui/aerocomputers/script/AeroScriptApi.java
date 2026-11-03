@@ -23,24 +23,13 @@ public final class AeroScriptApi {
         members.put("getRot", call(args -> computer.scriptGetRot(stringArrayArg(args, 0))));
         members.put("getVel", call(args -> computer.scriptGetVel(stringArrayArg(args, 0))));
         members.put("radar", call(args -> computer.scriptRadar(stringArrayArg(args, 0))));
-        members.put("send", call(args -> computer.scriptSend(stringArg(args, 0), stringArg(args, 1))));
-        members.put("read", call(args -> computer.scriptRead()));
-        members.put("clear", call(args -> computer.scriptClear()));
         members.put("getPower", call(args -> computer.scriptGetPower(stringArrayArg(args, 0))));
         members.put("setPower", call(args -> computer.scriptSetPower(stringArrayArg(args, 0), args.size() > 1 ? args.get(1) : 0)));
         members.put("setSpeed", call(args -> computer.scriptSetSpeed(stringArrayArg(args, 0), args.size() > 1 ? args.get(1) : 0)));
 
-        Map<String, Object> bigc = new LinkedHashMap<>();
-        bigc.put("aimangel", call(args -> computer.scriptCommand("bigc.aimangel", args)));
-        bigc.put("fire", call(args -> computer.scriptCommand("bigc.fire", args)));
-        bigc.put("aimpos", call(args -> computer.scriptCommand("bigc.aimpos", args)));
-        members.put("bigc", ProxyObject.fromMap(bigc));
+        members.put("bigc", new BigCApi(computer).asProxy());
+        members.put("slrw", new SlrwApi(computer).asProxy());
 
-        Map<String, Object> slrw = new LinkedHashMap<>();
-        slrw.put("firechin", call(args -> computer.scriptCommand("slrw.firechin", args)));
-        slrw.put("aimchinangel", call(args -> computer.scriptCommand("slrw.aimchinangel", args)));
-        slrw.put("aimchinpos", call(args -> computer.scriptCommand("slrw.aimchinpos", args)));
-        members.put("slrw", ProxyObject.fromMap(slrw));
         proxy = ProxyObject.fromMap(members);
     }
 

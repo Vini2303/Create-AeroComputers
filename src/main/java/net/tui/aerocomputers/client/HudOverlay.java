@@ -7,6 +7,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -121,19 +122,18 @@ public class HudOverlay implements LayeredDraw.Layer {
             var lineEntry = new HudRegistry.DrawEntry(
                     "line", xs.get(i), ys.get(i), xs.get(j), ys.get(j),
                     0, 0, "", 0, e.borderWidth(), 0, false, false,
-                    e.borderColor(), List.of(), List.of(), List.of(), List.of()
+                    e.borderColor(), List.of(), List.of(), List.of(), List.of(), List.of(), 0, 0
             );
             renderLine(g, lineEntry);
         }
     }
 
     private void renderCamera(GuiGraphics g, HudRegistry.DrawEntry e) {
-        if (CameraFeed.rendering) return;
+        BlockPos camPos = CameraLookup.requestFor(e);
+        if (camPos == null) return;
 
-        CameraFeed.requestFixed();
-
-        var target = CameraFeed.getTarget();
-        if (target == null) return;
+        var target = CameraFeed.getTarget(camPos);
+        if (target == null) return;   // first frames: nothing rendered yet
 
         float x = (float) e.x();
         float y = (float) e.y();

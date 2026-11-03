@@ -1,5 +1,6 @@
 package net.tui.aerocomputers.network;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -12,8 +13,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** Full snapshot of the entities near the camera, sent every server tick (20/s). */
-public record CameraEntitiesPayload(List<Snap> entities) implements CustomPacketPayload {
+/**
+ * Full snapshot of the entities near one camera, sent every server tick (20/s).
+ * Also carries the camera's current chunk, so the client can move the view centre of that camera world.
+ */
+public record CameraEntitiesPayload(BlockPos cam, int chunkX, int chunkZ, List<Snap> entities)
+        implements CustomPacketPayload {
 
     public record Snap(int id, UUID uuid, ResourceLocation type, String name,
                        double x, double y, double z,
@@ -63,8 +68,17 @@ public record CameraEntitiesPayload(List<Snap> entities) implements CustomPacket
     public static final Type<CameraEntitiesPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(AeroComputers.MOD_ID, "camera_entities"));
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, CameraEntitiesPayload> STREAM_CODEC =
-            Snap.CODEC.apply(ByteBufCodecs.list()).map(CameraEntitiesPayload::new, CameraEntitiesPayload::entities);
+    private static final StreamCodec<RegistryFriendlyByteBuf, List<Snap>> SNAP_LIST =
+            Snap.CODEC.apply(ByteBufCodecs.list());
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, CameraEntitiesPayload> STREAM_CODEC = StreamCodec.of(
+            (buf, p) -> {
+                buf.writeBlockPos(p.cam());
+                buf.writeVarInt(p.chunkX());
+                buf.writeVarInt(p.chunkZ());
+                SNAP_LIST.encode(buf, p.entities());
+            },
+            buf -> new CameraEntitiesPayload(buf.readBlockPos(), buf.readVarInt(), buf.readVarInt(), SNAP_LIST.decode(buf)));
 
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }

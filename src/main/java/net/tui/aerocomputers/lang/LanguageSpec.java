@@ -94,9 +94,9 @@ public final class LanguageSpec {
     /** module -> function name -> parameter names  ("name:p1,p2") */
     public static final Map<String, Map<String, List<String>>> FUNCTION_MODULES = Map.ofEntries(
             // ---- mod API ----
-            Map.entry("aero", fns("getPos:sensor_freq", "getRot:sensor_freq", "getVel:sensor_freq", "radar:sensor_freq", "send:name_id,message", "getPower:link_freq", "setPower:link_freq,power", "setSpeed:freq,speed", "read", "clear")),
-            Map.entry("bigc", fns("aimangel:pitch,yaw", "fire:rate", "aimpos:pos")),
-            Map.entry("slrw", fns("firechin:fire", "aimchinangel:pitch,yaw", "aimchinpos:pos")),
+            Map.entry("aero", fns("getPos:sensor_freq", "getRot:sensor_freq", "getVel:sensor_freq", "radar:sensor_freq", "getPower:link_freq", "setPower:link_freq,power", "setSpeed:freq,speed")),
+            Map.entry("bigc", fns("aimangle:freq,pitch,yaw", "fire:freq,rate", "aimpos:freq,x,y,z")),
+            Map.entry("slrw", fns("fire:freq,fire", "aimangle:freq,pitch,yaw", "aimpos:freq,x,y,z")),
 
             // ---- standard library (real Python semantics; needs "import x") ----
             Map.entry("math", fns("sqrt:x", "sin:x", "cos:x", "tan:x", "asin:x", "acos:x", "atan:x", "atan2:y,x",
@@ -139,7 +139,7 @@ public final class LanguageSpec {
                     "Line:hud_freq,x1,y1,x2,y2,width,color",
                     "Rect:hud_freq,x,y,w,h,border_width,center_color,border_color,render_center,render_border",
                     "Poly:hud_freq,xs,ys,border_width,border_color",
-                    "Cam:hud_freq,x,y,width,height")),
+                    "Cam:hud_freq,cam_freq,x,y,width,height,pitch,yaw")),
             Map.entry("collections", fns("deque:iterable,maxlen", "Counter:iterable", "OrderedDict",
                     "defaultdict:default_factory")),
             Map.entry("random", fns("Random:seed")),

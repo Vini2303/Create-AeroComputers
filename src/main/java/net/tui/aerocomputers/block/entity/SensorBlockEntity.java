@@ -27,6 +27,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.network.CameraChunkManager;
@@ -53,7 +54,7 @@ public class SensorBlockEntity extends KineticBlockEntity implements MenuProvide
     public List<List<Double>> getAllSubLevelPositions() {
         List<List<Double>> allPositions = new ArrayList<>();
 
-        if (this.level == null || currentSubLevel == null) {
+        if (this.level == null) {
             return allPositions;
         }
 
@@ -64,20 +65,56 @@ public class SensorBlockEntity extends KineticBlockEntity implements MenuProvide
             return allPositions;
         }
 
-        Vector3d currentPos = currentSubLevel.logicalPose().position();
+        Vector3d currentPos;
 
-        for (SubLevel subLevel : container.getAllSubLevels()) {
-            if (subLevel != currentSubLevel) {
-                Vector3d pos = subLevel.logicalPose().position();
-
-                allPositions.add(List.of(
-                        round2(pos.x()),
-                        round2(pos.y()),
-                        round2(pos.z())
-                ));
-            }
+        if (currentSubLevel != null) {
+            currentPos = currentSubLevel.logicalPose().position();
+        } else {
+            currentPos = new Vector3d(
+                    getBlockPos().getX() + 0.5,
+                    getBlockPos().getY() + 0.5,
+                    getBlockPos().getZ() + 0.5
+            );
         }
 
+        for (SubLevel subLevel : container.getAllSubLevels()) {
+
+            // Don't detect the sublevel containing this radar
+            if (subLevel == currentSubLevel) {
+                continue;
+            }
+
+            boolean frequencyMatch = false;
+
+            // Get the actual block entities using their positions
+            for (BlockEntitySubLevelActor actor : subLevel.getPlot().getBlockEntityActors()) {
+
+                if (actor instanceof RadarBlockerBlockEntity blocker) {
+
+                    if (Objects.equals(blocker.getFreqOne(), FREQ_ONE)
+                            && Objects.equals(blocker.getFreqTwo(), FREQ_TWO)) {
+
+                        frequencyMatch = true;
+                        break;
+                    }
+                }
+            }
+
+            // Exclude sublevels with matching blockers
+            if (frequencyMatch) {
+                continue;
+            }
+
+            Vector3d pos = subLevel.logicalPose().position();
+
+            allPositions.add(List.of(
+                    round2(pos.x()),
+                    round2(pos.y()),
+                    round2(pos.z())
+            ));
+        }
+
+        // Sort by distance from radar
         allPositions.sort(Comparator.comparingDouble(pos -> {
             double dx = pos.get(0) - currentPos.x();
             double dy = pos.get(1) - currentPos.y();

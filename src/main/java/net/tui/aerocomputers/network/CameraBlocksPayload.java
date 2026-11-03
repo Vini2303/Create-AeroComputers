@@ -10,8 +10,8 @@ import net.tui.aerocomputers.AeroComputers;
 
 import java.util.List;
 
-/** Block changes inside the camera area, sent once per server tick when something changed. */
-public record CameraBlocksPayload(List<Change> changes) implements CustomPacketPayload {
+/** Block changes inside the area of one camera, sent once per server tick when something changed. */
+public record CameraBlocksPayload(BlockPos cam, List<Change> changes) implements CustomPacketPayload {
 
     public record Change(BlockPos pos, int stateId) {}
 
@@ -23,8 +23,13 @@ public record CameraBlocksPayload(List<Change> changes) implements CustomPacketP
             ByteBufCodecs.VAR_INT, Change::stateId,
             Change::new);
 
-    public static final StreamCodec<ByteBuf, CameraBlocksPayload> STREAM_CODEC =
-            CHANGE_CODEC.apply(ByteBufCodecs.list()).map(CameraBlocksPayload::new, CameraBlocksPayload::changes);
+    private static final StreamCodec<ByteBuf, List<Change>> CHANGE_LIST =
+            CHANGE_CODEC.apply(ByteBufCodecs.list());
+
+    public static final StreamCodec<ByteBuf, CameraBlocksPayload> STREAM_CODEC = StreamCodec.composite(
+            BlockPos.STREAM_CODEC, CameraBlocksPayload::cam,
+            CHANGE_LIST, CameraBlocksPayload::changes,
+            CameraBlocksPayload::new);
 
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }

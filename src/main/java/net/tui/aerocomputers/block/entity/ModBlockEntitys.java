@@ -37,6 +37,10 @@ public class ModBlockEntitys {
             BLOCK_ENTITYS.register("camera_be", () -> BlockEntityType.Builder.of(
                     CameraBlockEntity::new, ModBlocks.CAMERABLOCK.get()).build(null));
 
+    public static final Supplier<BlockEntityType<RadarBlockerBlockEntity>> RADARBLOCKER_BE =
+            BLOCK_ENTITYS.register("radar_blocker_be", () -> BlockEntityType.Builder.of(
+                    RadarBlockerBlockEntity::new, ModBlocks.RADARBLOCKERBLOCK.get()).build(null));
+
 
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITYS.register(eventBus);

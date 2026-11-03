@@ -2,6 +2,7 @@ package net.tui.aerocomputers.block.custom;
 
 import com.mojang.serialization.MapCodec;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -21,9 +22,10 @@ import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
-import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
+import net.neoforged.api.distmarker.Dist;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
 import net.tui.aerocomputers.block.entity.SensorBlockEntity;
+import net.tui.aerocomputers.client.ShiftDown;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -94,12 +96,22 @@ public class SensorBlock extends DirectionalKineticBlock implements EntityBlock 
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-        if(true) {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.sensor_shift"));
+    public void appendHoverText(
+            ItemStack stack,
+            Item.TooltipContext context,
+            List<Component> tooltipComponents,
+            TooltipFlag tooltipFlag
+    ) {
+        if (ShiftDown.isDown()) {
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.sensor_shift")
+            );
         } else {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.pressshift"));
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.pressshift")
+            );
         }
+
         super.appendHoverText(stack, context, tooltipComponents, tooltipFlag);
     }
 }

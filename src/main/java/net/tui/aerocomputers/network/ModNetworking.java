@@ -59,6 +59,12 @@ public class ModNetworking {
                 DigitalTransmissionEntryPayload::handle
         );
 
+        registrar.playToServer(
+                RadarBlockerEntryPayload.TYPE,
+                RadarBlockerEntryPayload.STREAM_CODEC,
+                RadarBlockerEntryPayload::handle
+        );
+
         registrar.playToClient(
                 CameraChunkPayload.TYPE,
                 CameraChunkPayload.STREAM_CODEC,
@@ -76,22 +82,40 @@ public class ModNetworking {
                 ClientPayloads::handleCameraBlocks
         );
 
+        registrar.playToClient(
+                CameraBlockEntitiesPayload.TYPE,
+                CameraBlockEntitiesPayload.STREAM_CODEC,
+                ClientPayloads::handleCameraBlockEntities
+        );
+
+        registrar.playToServer(
+                CameraInterestPayload.TYPE,
+                CameraInterestPayload.STREAM_CODEC,
+                CameraInterestPayload::handle
+        );
+
         registrar.playToServer(FileActionPayload.TYPE, FileActionPayload.STREAM_CODEC, FileActionPayload::handle);
         registrar.playToClient(FileTreePayload.TYPE, FileTreePayload.STREAM_CODEC, FileTreePayload::handle);
         registrar.playToClient(FileContentPayload.TYPE, FileContentPayload.STREAM_CODEC, FileContentPayload::handle);
+        registrar.playToClient(CameraSubLevelsPayload.TYPE, CameraSubLevelsPayload.STREAM_CODEC, ClientPayloads::handleCameraSubLevels);
 
     }
 
     public final class ClientPayloads {
         public static void handleCameraChunk(CameraChunkPayload p, IPayloadContext ctx) {
-            ctx.enqueueWork(() -> CameraFeed.acceptChunk(p.packet()));
+            ctx.enqueueWork(() -> CameraFeed.acceptChunk(p.cam(), p.packet()));
         }
-
         public static void handleCameraEntities(CameraEntitiesPayload p, IPayloadContext ctx) {
-            ctx.enqueueWork(() -> CameraFeed.acceptEntities(p.entities()));
+            ctx.enqueueWork(() -> CameraFeed.acceptEntities(p.cam(), p.chunkX(), p.chunkZ(), p.entities()));
         }
         public static void handleCameraBlocks(CameraBlocksPayload p, IPayloadContext ctx) {
-            ctx.enqueueWork(() -> CameraFeed.acceptBlocks(p.changes()));
+            ctx.enqueueWork(() -> CameraFeed.acceptBlocks(p.cam(), p.changes()));
+        }
+        public static void handleCameraBlockEntities(CameraBlockEntitiesPayload p, IPayloadContext ctx) {
+            ctx.enqueueWork(() -> CameraFeed.acceptBlockEntities(p.cam(), p.entries()));
+        }
+        public static void handleCameraSubLevels(CameraSubLevelsPayload p, IPayloadContext ctx) {
+            ctx.enqueueWork(() -> CameraFeed.acceptSubLevels(p));
         }
     }
 }

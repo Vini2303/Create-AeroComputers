@@ -23,6 +23,7 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.HUD_HELMET);
                         output.accept(ModBlocks.HUDDISPLAY);
                         output.accept(ModBlocks.WEAPONLINKER);
+                        output.accept(ModBlocks.RADARBLOCKERBLOCK);
                         output.accept(ModBlocks.SENSORBLOCK);
                         output.accept(ModBlocks.DIGITALTRANSMISSIONBLOCK);
                         output.accept(ModBlocks.CAMERABLOCK);

@@ -11,6 +11,7 @@
   "block.createaerocomputers.board_computer": "Board Computer",
   "block.createaerocomputers.hud_display": "HUD Display",
   "block.createaerocomputers.weapon_linker": "Weapon Linker",
+  "block.createaerocomputers.radar_blocker": "Radar Blocker",
 
   "block.createaerocomputers.calcite_casing": "Calcite Casing",
 
@@ -41,6 +42,8 @@
 
   "tooltip.createaerocomputers.camera_shift": "Create an eye for your computer",
 
+  "tooltip.createaerocomputers.radar_blocker_shift": "Blocks Radar funktions, so you sublevel doent show up",
+
   "help.aero.basics": "Basics",
   "help.aero.basics.text": "This is the basics of the Aero Computer.",
 
@@ -59,5 +62,11 @@
 
   "gui.createaerocomputers.banners.computer": "Computer",
   "gui.createaerocomputers.banners.transformer": "Transformer",
-  "gui.createaerocomputers.banners.resources": "Resources"
+  "gui.createaerocomputers.banners.resources": "Resources",
+
+
+  "createaerocomputers.configuration.allowNativeAccess": "Allow Native Access",
+  "createaerocomputers.configuration.globalChatOutput": "Global Chat Output",
+  "createaerocomputers.configuration.allowedLibraries": "Allowed Libraries",
+  "createaerocomputers.configuration.python": "Python Config"
 }

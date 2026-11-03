@@ -1,19 +1,100 @@
+
 {
-  "variants": {
-    "facing=north": {
-      "model": "createaerocomputers:block/hud_display"
+  "multipart": [
+    {
+      "when": { "facing": "north" },
+      "apply": {
+        "model": "createaerocomputers:block/hud_display"
+      }
     },
-    "facing=south": {
-      "model": "createaerocomputers:block/hud_display",
-      "y": 180
+    {
+      "when": { "facing": "east" },
+      "apply": {
+        "model": "createaerocomputers:block/hud_display",
+        "y": 90
+      }
     },
-    "facing=east": {
-      "model": "createaerocomputers:block/hud_display",
-      "y": 90
+    {
+      "when": { "facing": "south" },
+      "apply": {
+        "model": "createaerocomputers:block/hud_display",
+        "y": 180
+      }
     },
-    "facing=west": {
-      "model": "createaerocomputers:block/hud_display",
-      "y": 270
+    {
+      "when": { "facing": "west" },
+      "apply": {
+        "model": "createaerocomputers:block/hud_display",
+        "y": 270
+      }
+    },
+
+    {
+      "when": { "up": "false", "facing": "north" },
+      "apply": { "model": "createaerocomputers:block/hud_display_up_connected" }
+    },
+    {
+      "when": { "up": "false", "facing": "east" },
+      "apply": { "model": "createaerocomputers:block/hud_display_up_connected", "y": 90 }
+    },
+    {
+      "when": { "up": "false", "facing": "south" },
+      "apply": { "model": "createaerocomputers:block/hud_display_up_connected", "y": 180 }
+    },
+    {
+      "when": { "up": "false", "facing": "west" },
+      "apply": { "model": "createaerocomputers:block/hud_display_up_connected", "y": 270 }
+    },
+
+    {
+      "when": { "down": "false", "facing": "north" },
+      "apply": { "model": "createaerocomputers:block/hud_display_down_connected" }
+    },
+    {
+      "when": { "down": "false", "facing": "east" },
+      "apply": { "model": "createaerocomputers:block/hud_display_down_connected", "y": 90 }
+    },
+    {
+      "when": { "down": "false", "facing": "south" },
+      "apply": { "model": "createaerocomputers:block/hud_display_down_connected", "y": 180 }
+    },
+    {
+      "when": { "down": "false", "facing": "west" },
+      "apply": { "model": "createaerocomputers:block/hud_display_down_connected", "y": 270 }
+    },
+
+    {
+      "when": { "west": "false", "facing": "north" },
+      "apply": { "model": "createaerocomputers:block/hud_display_left_connected" }
+    },
+    {
+      "when": { "west": "false", "facing": "east" },
+      "apply": { "model": "createaerocomputers:block/hud_display_left_connected", "y": 90 }
+    },
+    {
+      "when": { "west": "false", "facing": "south" },
+      "apply": { "model": "createaerocomputers:block/hud_display_left_connected", "y": 180 }
+    },
+    {
+      "when": { "west": "false", "facing": "west" },
+      "apply": { "model": "createaerocomputers:block/hud_display_left_connected", "y": 270 }
+    },
+
+    {
+      "when": { "east": "false", "facing": "north" },
+      "apply": { "model": "createaerocomputers:block/hud_display_right_connected" }
+    },
+    {
+      "when": { "east": "false", "facing": "east" },
+      "apply": { "model": "createaerocomputers:block/hud_display_right_connected", "y": 90 }
+    },
+    {
+      "when": { "east": "false", "facing": "south" },
+      "apply": { "model": "createaerocomputers:block/hud_display_right_connected", "y": 180 }
+    },
+    {
+      "when": { "east": "false", "facing": "west" },
+      "apply": { "model": "createaerocomputers:block/hud_display_right_connected", "y": 270 }
     }
-  }
+  ]
 }

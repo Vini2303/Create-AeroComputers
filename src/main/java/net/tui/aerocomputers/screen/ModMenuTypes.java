@@ -36,6 +36,9 @@ public class ModMenuTypes {
     public static final DeferredHolder<MenuType<?>, MenuType<CameraMenu>> CAMERA_MENU =
             registerMenuType("camera_menu", CameraMenu::new);
 
+    public static final DeferredHolder<MenuType<?>, MenuType<RadarBlockerMenu>> RADARBLOCKER_MENU =
+            registerMenuType("radar_blocker_menu", RadarBlockerMenu::new);
+
     private static <T extends AbstractContainerMenu>DeferredHolder<MenuType<?>, MenuType<T>> registerMenuType(String name, IContainerFactory<T> factory) {
         return MENUS.register(name, () -> IMenuTypeExtension.create(factory));
     }

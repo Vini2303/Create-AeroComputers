@@ -10,11 +10,13 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.tui.aerocomputers.AeroComputers;
+import net.tui.aerocomputers.block.entity.RadarBlockerBlockEntity;
 import net.tui.aerocomputers.block.entity.WeaponLinkerBlockEntity;
 
 public record WeaponLinkerEntryPayload(
         BlockPos pos,
-        String text
+        String freq_one,
+        String freq_two
 ) implements CustomPacketPayload {
 
     public static final Type<WeaponLinkerEntryPayload> TYPE =
@@ -25,7 +27,9 @@ public record WeaponLinkerEntryPayload(
                     BlockPos.STREAM_CODEC,
                     WeaponLinkerEntryPayload::pos,
                     ByteBufCodecs.stringUtf8(32767),
-                    WeaponLinkerEntryPayload::text,
+                    WeaponLinkerEntryPayload::freq_one,
+                    ByteBufCodecs.stringUtf8(32767),
+                    WeaponLinkerEntryPayload::freq_two,
                     WeaponLinkerEntryPayload::new
             );
 
@@ -46,7 +50,7 @@ public record WeaponLinkerEntryPayload(
             BlockEntity blockEntity =
                     player.level().getBlockEntity(payload.pos());
 
-            if (!(blockEntity instanceof WeaponLinkerBlockEntity hud)) {
+            if (!(blockEntity instanceof WeaponLinkerBlockEntity weaponLinkerBlockEntity)) {
                 return;
             }
 
@@ -59,8 +63,8 @@ public record WeaponLinkerEntryPayload(
                 return;
             }
 
-            hud.setEntry(payload.text());
-            hud.setChanged();
+            weaponLinkerBlockEntity.setFreq(payload.freq_one(), payload.freq_two());
+            weaponLinkerBlockEntity.setChanged();
         });
     }
 }

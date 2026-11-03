@@ -9,10 +9,12 @@ import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ArmorItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
+import net.tui.aerocomputers.client.ShiftDown;
 import net.tui.aerocomputers.network.HudEntryPayload;
 import net.tui.aerocomputers.screen.custom.HudMenu;
 
@@ -47,19 +49,22 @@ public class HUDHelmetItem extends ArmorItem {
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-        tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.hud_helmet"));
-
-        CustomData data = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
-        CompoundTag tag = data.copyTag();
-        String hud = tag.contains(HudEntryPayload.NBT_KEY) ? tag.getString(HudEntryPayload.NBT_KEY) : "";
-        tooltipComponents.add(Component.literal(hud));
-
-        if(Screen.hasShiftDown()) {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.hud_helmet_shift"));
+    public void appendHoverText(
+            ItemStack stack,
+            Item.TooltipContext context,
+            List<Component> tooltipComponents,
+            TooltipFlag tooltipFlag
+    ) {
+        if (ShiftDown.isDown()) {
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.hud_helmet_shift")
+            );
         } else {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.pressshift"));
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.pressshift")
+            );
         }
+
         super.appendHoverText(stack, context, tooltipComponents, tooltipFlag);
     }
 }

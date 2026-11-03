@@ -1,14 +1,11 @@
 package net.tui.aerocomputers.block.entity;
 
-import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.redstone.link.LinkBehaviour;
 import com.simibubi.create.content.redstone.link.RedstoneLinkFrequencySlot;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
-import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
@@ -21,7 +18,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.MenuProvider;
-import net.minecraft.world.entity.ai.sensing.Sensor;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -30,18 +26,17 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.tui.aerocomputers.AeroComputers;
+import net.tui.aerocomputers.compat.ModCompat;
+import net.tui.aerocomputers.config.AeroComputersConfig;
 import net.tui.aerocomputers.registries.DigitalTransmissionRegistry;
 import net.tui.aerocomputers.registries.HudRegistry;
 import net.tui.aerocomputers.registries.SensorRegistry;
+import net.tui.aerocomputers.registries.WeaponLinkerRegistry;
 import net.tui.aerocomputers.screen.custom.BoardComputerMenu;
-import net.tui.aerocomputers.script.AeroScriptApi;
-import net.tui.aerocomputers.script.HudScriptApi;
-import net.tui.aerocomputers.script.PythonScriptRuntime;
+import net.tui.aerocomputers.script.*;
 import net.tui.aerocomputers.network.CameraChunkManager;
-import net.tui.aerocomputers.script.SandboxFileSystem;
 import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
 import java.util.*;
@@ -50,6 +45,9 @@ import java.util.*;
 public class BoardComputerBlockEntity extends KineticBlockEntity implements MenuProvider, BlockEntitySubLevelActor {
 
     private String programPath = "";   // relativ zum Welt-Ordner, z. B. "main.py"
+
+    @Nullable
+    private UUID lastOpenedBy;
 
     private record FrequencyPair(String first, String second) {}
 
@@ -272,6 +270,9 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         List<Integer> borderColor = new ArrayList<>(List.of(0, 0, 0));
         List<Double> xs = new ArrayList<>();
         List<Double> ys = new ArrayList<>();
+        List<String> camFreq = new ArrayList<>();
+        double pitch = 0;
+        double yaw = 0;
     }
 
     private final List<DrawObject> drawObjects = new ArrayList<>();
@@ -284,29 +285,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     public int getEditorCompletionUpdateId() {
         return editorCompletionUpdateId;
     }
-
-    public record Command(String name, List<Double> args) {
-        public double arg(int i) { return i < args.size() ? args.get(i) : 0.0; }
-    }
-
-    private final Map<String, Command> commands = new LinkedHashMap<>();
-
-    private final List<String> messages = new ArrayList<>();
-
-    public void sendMessage(String message) {
-        messages.add(message);
-    }
-
-    public @Nullable Command getCommand(String name) {
-        return commands.get(name);
-    }
-
-    private void issueCommand(String name, double... values) {
-        List<Double> list = new ArrayList<>();
-        for (double v : values) list.add(v);
-        commands.put(name, new Command(name, List.copyOf(list)));
-    }
-
 
     public BoardComputerBlockEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntitys.BOARDCOMPUTER_BE.get(), pos, blockState);
@@ -415,7 +393,11 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     @Override
-    public @Nullable AbstractContainerMenu createMenu(int i, Inventory playerInventory, Player player) {
+    public @Nullable AbstractContainerMenu createMenu(
+            int i, Inventory playerInventory, Player player) {
+
+        lastOpenedBy = player.getUUID();
+
         return new BoardComputerMenu(i, playerInventory, this);
     }
 
@@ -438,10 +420,33 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     }
 
     private void onPythonPrint(String line) {
-        if (level == null || level.isClientSide || !(level instanceof ServerLevel serverLevel)) return;
-        Component message = Component.literal((computerName == null || computerName.isBlank()
-                ? "[Board Computer] " : "[" + computerName + "] ") + line);
-        for (Player player : serverLevel.players()) {
+        if (level == null || level.isClientSide) return;
+
+        Component message = Component.literal(
+                (computerName == null || computerName.isBlank()
+                        ? "[Board Computer] "
+                        : "[" + computerName + "] ")
+                        + line
+        );
+
+        // Global output enabled: send to everyone.
+        if (AeroComputersConfig.GLOBAL_CHAT_OUTPUT.get()) {
+            if (level instanceof ServerLevel serverLevel) {
+                serverLevel.getServer().getPlayerList()
+                        .broadcastSystemMessage(message, false);
+            }
+            return;
+        }
+
+        // Local output: send only to the last player who opened this computer.
+        if (lastOpenedBy == null) return;
+
+        var server = level.getServer();
+        if (server == null) return;
+
+        Player player = server.getPlayerList().getPlayer(lastOpenedBy);
+
+        if (player != null) {
             player.sendSystemMessage(message);
         }
     }
@@ -455,8 +460,13 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         java.nio.file.Path fileRoot = SandboxFileSystem.rootFor(server);
 
         hudScriptApi = new HudScriptApi(this);
+        boolean hasBigC = ModCompat.hasBigCannons();
+        boolean hasCreateArms = ModCompat.hasCreateArms();
+
         pythonRuntime = new PythonScriptRuntime(
                 new AeroScriptApi(this),
+                hasBigC ? new BigCApi(this) : null,
+                hasCreateArms ? new SlrwApi(this) : null,
                 hudScriptApi.asProxy(),
                 this::onPythonPrint,
                 fileRoot
@@ -487,8 +497,16 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             pythonRuntime.start(program);
             pythonError = null;
         } catch (RuntimeException exception) {
-            pythonError = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            AeroComputers.LOGGER.error("Python compile/start error at {}: {}", worldPosition, pythonError, exception);
+            pythonError = exception.getMessage() == null
+                    ? exception.getClass().getSimpleName()
+                    : exception.getMessage();
+
+            AeroComputers.LOGGER.error(
+                    "Python compile/start error at {}: {}",
+                    worldPosition, pythonError, exception
+            );
+
+            onPythonPrint("[Python Error] " + pythonError);
         }
     }
 
@@ -506,8 +524,17 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             // One host->guest call; the stepping loop runs inside Python.
             pythonRuntime.step(maxSteps, PYTHON_BUDGET_SECONDS);
         } catch (RuntimeException exception) {
-            pythonError = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            AeroComputers.LOGGER.error("Python script error at {}: {}", worldPosition, pythonError, exception);
+            pythonError = exception.getMessage() == null
+                    ? exception.getClass().getSimpleName()
+                    : exception.getMessage();
+
+            AeroComputers.LOGGER.error(
+                    "Python script error at {}: {}",
+                    worldPosition, pythonError, exception
+            );
+
+            onPythonPrint("[Python Error] " + pythonError);
+
             setChanged();
         }
     }
@@ -560,40 +587,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         return v;
     }
 
-    public Object scriptCommand(String name, List<Object> args) {
-        switch (name) {
-            case "bigc.aimangel" -> issueCommand(name,
-                    args.size() > 0 ? asDouble(args.get(0)) : 0.0,
-                    args.size() > 1 ? asDouble(args.get(1)) : 0.0);
-            case "bigc.fire", "slrw.firechin" -> issueCommand(name,
-                    args.size() > 0 ? asDouble(args.get(0)) : 0.0);
-            case "bigc.aimpos", "slrw.aimchinpos" -> {
-                List<Double> pos = args.size() > 0 ? toPosList(args.get(0)) : List.of(0.0, 0.0, 0.0);
-                issueCommand(name, pos.get(0), pos.get(1), pos.get(2));
-            }
-            case "slrw.aimchinangel" -> issueCommand(name,
-                    args.size() > 0 ? asDouble(args.get(0)) : 0.0,
-                    args.size() > 1 ? asDouble(args.get(1)) : 0.0);
-            default -> throw new IllegalArgumentException("Unknown Aero command: " + name);
-        }
-        return 0.0;
-    }
-
-    public Object scriptSend(String name, String message) {
-        BoardComputerBlockEntity target = ComputerRegistry.get(name);
-        if (target != null) target.sendMessage(message);
-        return target != null;
-    }
-
-    public Object scriptRead() {
-        return messages.isEmpty() ? "" : messages.remove(0);
-    }
-
-    public Object scriptClear() {
-        messages.clear();
-        return 0.0;
-    }
-
     public String scriptCreateHudObject(String type, List<Object> args) {
         if (args.isEmpty() || !(args.get(0) instanceof List<?> freq)
                 || freq.size() != 2
@@ -617,12 +610,41 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         obj.id = "d" + (drawObjectIdCounter++);
         obj.freqOne = freqOne;
         obj.freqTwo = freqTwo;
+
         switch (type) {
             case "hud.Label" -> { obj.type = "label"; obj.x = argNumber(args, 0, 0); obj.y = argNumber(args, 1, 0); obj.text = arg(args, 2) == null ? "" : arg(args, 2).toString(); obj.color = toColorList(arg(args, 3)); obj.fontSize = argNumber(args, 4, 1); }
             case "hud.Line" -> { obj.type = "line"; obj.x = argNumber(args, 0, 0); obj.y = argNumber(args, 1, 0); obj.x2 = argNumber(args, 2, 0); obj.y2 = argNumber(args, 3, 0); obj.width = argNumber(args, 4, 1); obj.color = toColorList(arg(args, 5)); }
             case "hud.Poly" -> { obj.type = "poly"; obj.xs = toDoubleList(arg(args, 0)); obj.ys = toDoubleList(arg(args, 1)); obj.borderWidth = argNumber(args, 2, 1); obj.borderColor = toColorList(arg(args, 3)); }
             case "hud.Rect" -> { obj.type = "rect"; obj.x = argNumber(args, 0, 0); obj.y = argNumber(args, 1, 0); obj.w = argNumber(args, 2, 0); obj.h = argNumber(args, 3, 0); obj.borderWidth = argNumber(args, 4, 1); obj.centerColor = toColorList(arg(args, 5)); obj.borderColor = toColorList(arg(args, 6)); obj.renderCenter = arg(args, 7) == null || asBoolean(arg(args, 7)); obj.renderBorder = arg(args, 8) == null || asBoolean(arg(args, 8)); }
-            case "hud.Cam" -> { obj.type = "cam"; obj.x = argNumber(args, 0, 0); obj.y = argNumber(args, 1, 0); obj.w = argNumber(args, 2, 0); obj.h = argNumber(args, 3, 0); }
+            case "hud.Cam" -> {
+                if (args.isEmpty() || !(args.get(0) instanceof List<?> camFreq)
+                        || camFreq.size() != 2
+                        || !(camFreq.get(0) instanceof String)
+                        || !(camFreq.get(1) instanceof String)) {
+                    throw new IllegalArgumentException(
+                            "hud.Cam expects [cam_freq_one, cam_freq_two] as its second argument"
+                    );
+                }
+
+                String camFreqOne = (String) camFreq.get(0);
+                String camFreqTwo = (String) camFreq.get(1);
+
+                if (camFreqOne.isBlank() || camFreqTwo.isBlank()) {
+                    throw new IllegalArgumentException("Camera frequencies cannot be blank");
+                }
+
+                obj.camFreq = new ArrayList<>(List.of(camFreqOne, camFreqTwo));
+
+                args = args.subList(1, args.size());
+
+                obj.type = "cam";
+                obj.x = argNumber(args, 0, 0);
+                obj.y = argNumber(args, 1, 0);
+                obj.w = argNumber(args, 2, 0);
+                obj.h = argNumber(args, 3, 0);
+                obj.pitch = argNumber(args, 4, 0);
+                obj.yaw = argNumber(args, 5, 0);
+            }
             default -> throw new IllegalArgumentException("Unknown HUD object: " + type);
         }
         drawObjects.add(obj); markDrawDirty(); return obj.id;
@@ -633,23 +655,59 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
     public Object scriptGetHudField(String id, String field) {
         DrawObject object = findDrawObject(id);
         if (object == null) return null;
+
         return switch (field) {
-            case "x", "x1" -> object.x; case "y", "y1" -> object.y; case "x2" -> object.x2; case "y2" -> object.y2;
-            case "text" -> object.text; case "color" -> new ArrayList<>(object.color); case "center_color" -> new ArrayList<>(object.centerColor); case "border_color" -> new ArrayList<>(object.borderColor);
-            case "font_size" -> object.fontSize; case "width" -> object.width; case "border_width" -> object.borderWidth; case "w" -> object.w; case "h" -> object.h;
-            case "xs" -> new ArrayList<>(object.xs); case "ys" -> new ArrayList<>(object.ys); case "render_center" -> object.renderCenter; case "render_border" -> object.renderBorder; default -> null;
+            case "x", "x1" -> object.x;
+            case "y", "y1" -> object.y;
+            case "x2" -> object.x2;
+            case "y2" -> object.y2;
+            case "text" -> object.text;
+            case "color" -> new ArrayList<>(object.color);
+            case "center_color" -> new ArrayList<>(object.centerColor);
+            case "border_color" -> new ArrayList<>(object.borderColor);
+            case "font_size" -> object.fontSize;
+            case "width" -> object.width;
+            case "border_width" -> object.borderWidth;
+            case "w" -> object.w;
+            case "h" -> object.h;
+            case "xs" -> new ArrayList<>(object.xs);
+            case "ys" -> new ArrayList<>(object.ys);
+            case "cam_freq" -> new ArrayList<>(object.camFreq);
+            case "render_center" -> object.renderCenter;
+            case "render_border" -> object.renderBorder;
+            case "pitch" -> object.pitch;
+            case "yaw" -> object.yaw;
+            default -> null;
         };
     }
 
     public void scriptSetHudField(String id, String field, Object value) {
         DrawObject object = findDrawObject(id);
         if (object == null) return;
+
         switch (field) {
-            case "x", "x1" -> object.x = asDouble(value); case "y", "y1" -> object.y = asDouble(value); case "x2" -> object.x2 = asDouble(value); case "y2" -> object.y2 = asDouble(value);
-            case "text" -> object.text = asText(value); case "color" -> object.color = toColorList(value); case "center_color" -> object.centerColor = toColorList(value); case "border_color" -> object.borderColor = toColorList(value);
-            case "font_size" -> object.fontSize = asDouble(value); case "width" -> object.width = asDouble(value); case "border_width" -> object.borderWidth = asDouble(value); case "w" -> object.w = asDouble(value); case "h" -> object.h = asDouble(value);
-            case "xs" -> object.xs = toDoubleList(value); case "ys" -> object.ys = toDoubleList(value); case "render_center" -> object.renderCenter = asBoolean(value); case "render_border" -> object.renderBorder = asBoolean(value);
+            case "x", "x1" -> object.x = asDouble(value);
+            case "y", "y1" -> object.y = asDouble(value);
+            case "x2" -> object.x2 = asDouble(value);
+            case "y2" -> object.y2 = asDouble(value);
+            case "text" -> object.text = asText(value);
+            case "color" -> object.color = toColorList(value);
+            case "center_color" -> object.centerColor = toColorList(value);
+            case "border_color" -> object.borderColor = toColorList(value);
+            case "font_size" -> object.fontSize = asDouble(value);
+            case "width" -> object.width = asDouble(value);
+            case "border_width" -> object.borderWidth = asDouble(value);
+            case "w" -> object.w = asDouble(value);
+            case "h" -> object.h = asDouble(value);
+            case "xs" -> object.xs = toDoubleList(value);
+            case "ys" -> object.ys = toDoubleList(value);
+            case "cam_freq" -> object.camFreq = toStringList(value);
+            case "render_center" -> object.renderCenter = asBoolean(value);
+            case "render_border" -> object.renderBorder = asBoolean(value);
+            case "pitch" -> object.pitch = asDouble(value);
+            case "yaw" -> object.yaw = asDouble(value);
         }
+
         markDrawDirty();
     }
 
@@ -661,11 +719,84 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         }
     }
 
+    public Object scriptBigCFire(@Nullable String[] freq, Object fireRate) {
+        if (freq != null) {
+            Set<WeaponLinkerBlockEntity> wls = WeaponLinkerRegistry.get(freq[0], freq[1]);
+            for (WeaponLinkerBlockEntity wl : wls) {
+                wl.setBigCFireRate((int) asDouble(fireRate));
+            }
+        }
+        return fireRate;
+    }
+
+    public Object scriptBigCAimAngle(@Nullable String[] freq, Object pitch, Object yaw) {
+        if (freq != null) {
+            Set<WeaponLinkerBlockEntity> wls = WeaponLinkerRegistry.get(freq[0], freq[1]);
+            for (WeaponLinkerBlockEntity wl : wls) {
+                wl.setBigCAimAngle(asDouble(pitch), asDouble(yaw));
+            }
+        }
+        return null;
+    }
+
+    public Object scriptBigCAimPos(@Nullable String[] freq, Object x, Object y, Object z) {
+        if (freq != null) {
+            Set<WeaponLinkerBlockEntity> wls = WeaponLinkerRegistry.get(freq[0], freq[1]);
+            for (WeaponLinkerBlockEntity wl : wls) {
+                wl.setBigCAimPos(asDouble(x), asDouble(y), asDouble(z));
+            }
+        }
+        return null;
+    }
+
+    public Object scriptChinFire(@Nullable String[] freq, Object fire) {
+        if (freq != null) {
+            Set<WeaponLinkerBlockEntity> wls = WeaponLinkerRegistry.get(freq[0], freq[1]);
+            for (WeaponLinkerBlockEntity wl : wls) {
+                wl.setChinFire(asBoolean(fire));
+            }
+        }
+        return fire;
+    }
+
+    public Object scriptChinAimAngle(@Nullable String[] freq, Object pitch, Object yaw) {
+        if (freq != null) {
+            Set<WeaponLinkerBlockEntity> wls = WeaponLinkerRegistry.get(freq[0], freq[1]);
+            for (WeaponLinkerBlockEntity wl : wls) {
+                wl.setChinAimAngle(asDouble(pitch), asDouble(yaw));
+            }
+        }
+        return null;
+    }
+
+    public Object scriptChinAimPos(@Nullable String[] freq, Object x, Object y, Object z) {
+        if (freq != null) {
+            Set<WeaponLinkerBlockEntity> wls = WeaponLinkerRegistry.get(freq[0], freq[1]);
+            for (WeaponLinkerBlockEntity wl : wls) {
+                wl.setChinAimPos(asDouble(x), asDouble(y), asDouble(z));
+            }
+        }
+        return null;
+    }
+
     private @Nullable DrawObject findDrawObject(String id) {
         for (DrawObject object : drawObjects) {
             if (Objects.equals(object.id, id)) return object;
         }
         return null;
+    }
+
+    private List<String> toStringList(Object value) {
+        if (!(value instanceof List<?> list))
+            return new ArrayList<>();
+
+        List<String> result = new ArrayList<>();
+
+        for (Object element : list) {
+            result.add(String.valueOf(element));
+        }
+
+        return result;
     }
 
 
@@ -743,10 +874,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
 
         if (level == null || level.isClientSide)
             return;
-
-        if (level instanceof ServerLevel sl && !drawObjects.isEmpty()
-                && drawObjects.stream().anyMatch(o -> "cam".equals(o.type)))
-            CameraChunkManager.tick(sl);
 
         int rpm = (int) Math.abs(getSpeed());
 
@@ -839,10 +966,8 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         super.onLoad();
         if (this.level != null && !this.level.isClientSide) {
             program = readProgramFile();
-            ComputerRegistry.register(computerName, this);
             closePythonRuntime();
-            running = true; // Reloading the computer automatically resumes its program.
-            // The runtime is started lazily by tick().
+            running = true;
         }
     }
 
@@ -851,21 +976,13 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         closePythonRuntime();
         HudRegistry.clearComputer(worldPosition);
         super.remove();
-        if (level != null && !level.isClientSide) {
-            ComputerRegistry.unregister(computerName, this);
-        }
     }
 
     public void setComputerName(String name) {
         if (Objects.equals(this.computerName, name))
             return;
 
-        boolean server = level != null && !level.isClientSide;
-        if (server) ComputerRegistry.unregister(this.computerName, this);
-
         this.computerName = name;
-
-        if (server) ComputerRegistry.register(name, this);
 
         setChanged();
         sync();
@@ -879,7 +996,6 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         variables.clear();
         closePythonRuntime();   // tick() starts a new runtime lazily, only if running
         drawObjects.clear();
-        commands.clear();
         drawObjectIdCounter = 0;
         pythonError = null;
         hudDirty = true;
@@ -954,7 +1070,10 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                     List.copyOf(o.centerColor),
                     List.copyOf(o.borderColor),
                     List.copyOf(o.xs),
-                    List.copyOf(o.ys)
+                    List.copyOf(o.ys),
+                    List.copyOf(o.camFreq),
+                    o.pitch,
+                    o.yaw
             );
 
             HudRegistry.FreqPair key =
@@ -968,13 +1087,14 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
         HudRegistry.clearComputer(worldPosition);
 
         // Register this computer's current entries.
-        grouped.forEach((key, entries) ->
-                HudRegistry.update(
-                        key.freqOne(),
-                        key.freqTwo(),
-                        worldPosition,
-                        entries
-                )
+        grouped.forEach((key, entries) -> {
+                    HudRegistry.update(
+                            key.freqOne(),
+                            key.freqTwo(),
+                            worldPosition,
+                            entries
+                    );
+                }
         );
     }
 
@@ -1001,6 +1121,14 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             ct.putIntArray("borderColor", o.borderColor.stream().mapToInt(Integer::intValue).toArray());
             ct.putString("freqOne", o.freqOne == null ? "" : o.freqOne);
             ct.putString("freqTwo", o.freqTwo == null ? "" : o.freqTwo);
+            ct.putDouble("pitch", o.pitch);
+            ct.putDouble("yaw", o.yaw);
+
+            ListTag camFreqTag = new ListTag();
+            for (String freq : o.camFreq) {
+                camFreqTag.add(net.minecraft.nbt.StringTag.valueOf(freq));
+            }
+            ct.put("camFreq", camFreqTag);
 
             ListTag xsTag = new ListTag();
             for (double v : o.xs) xsTag.add(net.minecraft.nbt.DoubleTag.valueOf(v));
@@ -1044,6 +1172,14 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
             o.color = Arrays.stream(ct.getIntArray("color")).boxed().toList();
             o.centerColor = Arrays.stream(ct.getIntArray("centerColor")).boxed().toList();
             o.borderColor = Arrays.stream(ct.getIntArray("borderColor")).boxed().toList();
+
+            o.pitch = ct.getDouble("pitch");
+            o.yaw = ct.getDouble("yaw");
+
+            ListTag camFreqTag = ct.getList("camFreq", Tag.TAG_STRING);
+            for (int j = 0; j < camFreqTag.size(); j++) {
+                o.camFreq.add(camFreqTag.getString(j));
+            }
 
             ListTag xsTag = ct.getList("xs", Tag.TAG_DOUBLE);
             for (int j = 0; j < xsTag.size(); j++) o.xs.add(xsTag.getDouble(j));

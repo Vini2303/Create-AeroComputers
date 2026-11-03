@@ -13,6 +13,7 @@ import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.block.custom.*;
 import net.tui.aerocomputers.item.ModItems;
 
+import javax.swing.*;
 import java.util.function.Supplier;
 
 public class ModBlocks {
@@ -31,7 +32,7 @@ public class ModBlocks {
                     .lightLevel(state -> 0)));
 
     public static final DeferredBlock<Block> WEAPONLINKER = registerBlock("weapon_linker",
-            () -> new WeaponLinkerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL).noOcclusion()));
+            () -> new WeaponLinkerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
 
     public static final DeferredBlock<Block> TRANSFORMIUM = registerBlock("transformium",
             () -> new Block(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL).requiresCorrectToolForDrops()));
@@ -47,6 +48,9 @@ public class ModBlocks {
 
     public static final DeferredBlock<Block> CAMERABLOCK = registerBlock("camera",
             () -> new CameraBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
+
+    public static final DeferredBlock<Block> RADARBLOCKERBLOCK = registerBlock("radar_blocker",
+            () -> new RadarBlockerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
 
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {

@@ -11,6 +11,7 @@ public final class AeroComputersConfig {
             new ModConfigSpec.Builder();
 
     public static final ModConfigSpec.BooleanValue ALLOW_NATIVE_ACCESS;
+    public static final ModConfigSpec.BooleanValue GLOBAL_CHAT_OUTPUT;
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>>
             ALLOWED_LIBRARIES;
@@ -28,6 +29,13 @@ public final class AeroComputersConfig {
                 )
                 .gameRestart()
                 .define("allowNativeAccess", false);
+
+        GLOBAL_CHAT_OUTPUT = BUILDER
+                .comment(
+                        "If true, Python print output and interpreter errors are visible to everyone.",
+                        "If false, only the last player who opened the board computer sees them."
+                )
+                .define("globalChatOutput", false);
 
         ALLOWED_LIBRARIES = BUILDER
                 .comment(

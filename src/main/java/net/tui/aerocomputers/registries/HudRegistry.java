@@ -30,7 +30,11 @@ public final class HudRegistry {
             List<Integer> centerColor,
             List<Integer> borderColor,
             List<Double> xs,
-            List<Double> ys
+            List<Double> ys,
+            List<String> camFreq,
+            double pitch,
+            double yaw
+
     ) {}
 
     public record FreqPair(String freqOne, String freqTwo) {}

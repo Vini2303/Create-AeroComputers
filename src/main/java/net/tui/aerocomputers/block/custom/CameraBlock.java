@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.tui.aerocomputers.block.entity.CameraBlockEntity;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
+import net.tui.aerocomputers.client.ShiftDown;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -100,12 +101,22 @@ public class CameraBlock extends DirectionalKineticBlock implements EntityBlock 
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-        if(true) {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.camera_shift"));
+    public void appendHoverText(
+            ItemStack stack,
+            Item.TooltipContext context,
+            List<Component> tooltipComponents,
+            TooltipFlag tooltipFlag
+    ) {
+        if (ShiftDown.isDown()) {
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.camera_shift")
+            );
         } else {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.pressshift"));
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.pressshift")
+            );
         }
+
         super.appendHoverText(stack, context, tooltipComponents, tooltipFlag);
     }
 }

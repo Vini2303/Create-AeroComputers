@@ -16,11 +16,14 @@ public final class CameraConfig {
     public static final float YAW = 0f;
     public static final float PITCH = 30f;   // positive = looking down
     public static final float FOV = 70f;
+    public static final double SUBLEVEL_RADIUS = 160.0;   // Sublevels in diesem Umkreis der Kamera werden gespiegelt
+    public static final boolean DEBUG = true;             // später auf false
+
 
     /** Ticket distance. 2 = 5x5 chunks fully loaded (needed so the 3x3 in the middle renders). */
     public static final int LOAD_DISTANCE = 2;
     /** Chunks within this radius are sent to clients IF they are already loaded. */
-    public static final int SEND_RADIUS = 10;
+    public static final int SEND_RADIUS = 6;
     /** Entities within this many blocks of the camera are synced. */
     public static final double ENTITY_RADIUS = 96;
 

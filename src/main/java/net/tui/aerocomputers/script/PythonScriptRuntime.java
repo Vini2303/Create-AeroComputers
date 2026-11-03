@@ -134,6 +134,8 @@ public final class PythonScriptRuntime implements AutoCloseable {
                 ns = module.__dict__
                 ns["__builtins__"] = _aero_safe_builtins
                 ns["aero"] = _aero_globals().get("aero")
+                ns["bigc"] = _aero_globals().get("bigc")
+                ns["slrw"] = _aero_globals().get("slrw")
                 ns["hud"] = _aero_globals().get("hud")
                 # register first so circular imports don't loop
                 _aero_modules[name] = module
@@ -254,7 +256,7 @@ public final class PythonScriptRuntime implements AutoCloseable {
                     if node.id.startswith("_aero_"):
                         raise SyntaxError("Names beginning with _aero_ are reserved")
                     if isinstance(node.ctx, (_aero_ast.Store, _aero_ast.Del)):
-                        if node.id in ("aero", "hud", "__builtins__"):
+                        if node.id in ("aero", "bigc", "slrw", "hud", "__builtins__"):
                             raise SyntaxError("Reserved runtime name: " + node.id)
                         self.names.add(node.id)
                 def visit_Import(self, node):
@@ -331,13 +333,17 @@ public final class PythonScriptRuntime implements AutoCloseable {
                 return True
 
             def _aero_get_names():
-                return [k for k in _aero_globals().keys() if not k.startswith("_aero_") and k not in ("aero", "hud", "__builtins__")]
+                return [
+                    k for k in _aero_globals().keys()
+                    if not k.startswith("_aero_")
+                    and k not in ("aero", "bigc", "slrw", "hud", "__builtins__")
+                ]
             return _aero_start, _aero_step_n, _aero_get_names, _aero_wrap_api
 
         _aero_start, _aero_step_n, _aero_get_names, _aero_wrap_api = _aero_make_runtime()
         """;
 
-    public PythonScriptRuntime(Object aeroApi, Object hudApi, Consumer<String> output, Path fileRoot) {
+    public PythonScriptRuntime(Object aeroApi, Object bigcApi, Object slrwApi, Object hudApi, Consumer<String> output, Path fileRoot) {
         this.output = output == null ? line -> {} : output;
         OutputStream chatOutput = new OutputStream() {
             private final ByteArrayOutputStream line = new ByteArrayOutputStream();
@@ -389,16 +395,48 @@ public final class PythonScriptRuntime implements AutoCloseable {
         this.startFn = bindings.getMember("_aero_start");
         this.stepFn = bindings.getMember("_aero_step_n");
 
-        // aero goes through the wrapper so its results are real Python lists
+        // Register aero
         Object rawAero = aeroApi instanceof AeroScriptApi api ? api.asProxy() : aeroApi;
-        bindings.putMember("aero", bindings.getMember("_aero_wrap_api").execute(rawAero));
+        bindings.putMember(
+                "aero",
+                bindings.getMember("_aero_wrap_api").execute(rawAero)
+        );
+
+        if (bigcApi != null) {
+            Object rawBigc = bigcApi instanceof BigCApi api
+                    ? api.asProxy()
+                    : bigcApi;
+
+            bindings.putMember(
+                    "bigc",
+                    bindings.getMember("_aero_wrap_api").execute(rawBigc)
+            );
+        }
+
+        if (slrwApi != null) {
+            Object rawSlrw = slrwApi instanceof SlrwApi api
+                    ? api.asProxy()
+                    : slrwApi;
+
+            bindings.putMember(
+                    "slrw",
+                    bindings.getMember("_aero_wrap_api").execute(rawSlrw)
+            );
+        }
     }
 
     public void start(String source) {
-        context.resetLimits();
-        startFn.execute(source == null ? "" : source);
-        started = true;
-        finished = false;
+        try {
+            context.resetLimits();
+            startFn.execute(source == null ? "" : source);
+
+            started = true;
+            finished = false;
+
+        } catch (RuntimeException exception) {
+            finished = true;
+            reportError("while starting script", exception);
+        }
     }
 
     /**
@@ -408,13 +446,18 @@ public final class PythonScriptRuntime implements AutoCloseable {
      */
     public boolean step(int maxSteps, double budgetSeconds) {
         if (!started || finished) return false;
+
         try {
             context.resetLimits();
+
             finished = !stepFn.execute(maxSteps, budgetSeconds).asBoolean();
+
             return !finished;
+
         } catch (RuntimeException exception) {
             finished = true;
-            throw exception;
+            reportError("while executing script", exception);
+            return false;
         }
     }
 
@@ -456,5 +499,26 @@ public final class PythonScriptRuntime implements AutoCloseable {
     @Override
     public void close() {
         context.close();
+    }
+
+    private void reportError(String phase, RuntimeException exception) {
+        String message = exception.getMessage();
+
+        if (message == null || message.isBlank()) {
+            message = exception.getClass().getSimpleName();
+        }
+
+        output.accept("§c[Python Error] §f" + phase);
+        output.accept("§c" + message);
+
+        // Include Python traceback if available
+        if (exception instanceof org.graalvm.polyglot.PolyglotException polyglotException) {
+            String traceback = polyglotException.getPolyglotStackTrace()
+                    .toString();
+
+            if (traceback != null && !traceback.isBlank()) {
+                output.accept("§7" + traceback);
+            }
+        }
     }
 }

@@ -46,6 +46,7 @@ public abstract class CreativeModeTabMixin {
         addItem(items, searchItems, ModItems.HUD_HELMET.get());
         addItem(items, searchItems, ModBlocks.HUDDISPLAY.asItem());
         addItem(items, searchItems, ModBlocks.WEAPONLINKER.asItem());
+        addItem(items, searchItems, ModBlocks.RADARBLOCKERBLOCK.asItem());
         addItem(items, searchItems, ModBlocks.SENSORBLOCK.asItem());
         addItem(items, searchItems, ModBlocks.DIGITALTRANSMISSIONBLOCK.asItem());
         addItem(items, searchItems, ModBlocks.CAMERABLOCK.asItem());

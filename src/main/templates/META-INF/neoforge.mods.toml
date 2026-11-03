@@ -99,3 +99,19 @@ mandatory=true
 versionRange="[6.0.10,)"
 ordering="AFTER"
 side="BOTH"
+
+# Create Big Cannons (optional)
+[[dependencies.${mod_id}]]
+modId="createbigcannons"
+type="optional"
+versionRange="*"
+ordering="AFTER"
+side="BOTH"
+
+# SLRW (optional)
+[[dependencies.${mod_id}]]
+modId="createarms"
+type="optional"
+versionRange="*"
+ordering="AFTER"
+side="BOTH"

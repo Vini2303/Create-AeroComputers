@@ -11,6 +11,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.neoforged.fml.ModList;
 import net.tui.aerocomputers.block.entity.BoardComputerBlockEntity;
 import net.tui.aerocomputers.config.AeroComputersConfig;
 import net.tui.aerocomputers.lang.*;
@@ -460,13 +461,37 @@ public class CodeEditorWidget extends AbstractWidget {
         enabledLibs = set;
     }
 
+    /**
+     * Whether an optional API module can be used by this editor.
+     * Keep the LanguageSpec catalog static; only the editor's visible suggestions
+     * and signature help are filtered here.
+     */
+    private static boolean isOptionalApiModuleAvailable(String module) {
+        return switch (module) {
+            case "bigc" -> ModList.get().isLoaded("createbigcannons");
+            case "slrw" -> ModList.get().isLoaded("createarms");
+            default -> true;
+        };
+    }
+
+    private static boolean isOptionalApiFunction(String qualifiedName) {
+        int dot = qualifiedName.indexOf('.');
+        if (dot <= 0) return false;
+
+        String module = qualifiedName.substring(0, dot);
+        return module.equals("bigc") || module.equals("slrw");
+    }
+
     /** an allowed library OR a local .py file next to the program */
     private boolean isKnownModule(String w) {
-        return enabledLibs.contains(w) || LocalModules.has(w);
+        return (LanguageSpec.MODULES.contains(w) && isOptionalApiModuleAvailable(w))
+                || enabledLibs.contains(w)
+                || LocalModules.has(w);
     }
 
     private boolean isModuleName(String w) {
-        return LanguageSpec.MODULES.contains(w) || isKnownModule(w);
+        return (LanguageSpec.MODULES.contains(w) && isOptionalApiModuleAvailable(w))
+                || isKnownModule(w);
     }
 
     /** a module that comes from a local file (and is not a catalog library) */
@@ -1375,7 +1400,7 @@ public class CodeEditorWidget extends AbstractWidget {
                 }
                 String q = mod + "." + w;
                 if (LanguageSpec.NATIVE_CLASSES.containsKey(q)) return C_CLASS;
-                if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(q)) return C_FUNCTION;
+                if (LanguageAvailability.builtinFunctions().containsKey(q)) return C_FUNCTION;
                 if (LanguageSpec.MODULE_CONSTANTS.getOrDefault(mod, List.of()).contains(w)) return C_CONSTANT;
             }
             return n.equals("(") ? C_FUNCTION : C_VARIABLE;
@@ -1386,7 +1411,7 @@ public class CodeEditorWidget extends AbstractWidget {
         String imported = importedNames.get(w);
         if (imported != null) {
             if (LanguageSpec.NATIVE_CLASSES.containsKey(imported)) return C_CLASS;
-            if (LanguageSpec.BUILTIN_FUNCTIONS.containsKey(imported)) return C_FUNCTION;
+            if (LanguageAvailability.builtinFunctions().containsKey(imported)) return C_FUNCTION;
             int d = imported.indexOf('.');
             if (d > 0 && isLocalModule(imported.substring(0, d))) {
                 String lm = imported.substring(0, d);
@@ -2857,7 +2882,7 @@ public class CodeEditorWidget extends AbstractWidget {
 
             if (afterImport && prefix.size() > 1 && isKnownModule(prefix.get(1).text())) {
                 String mod = prefix.get(1).text();
-                for (String m : LanguageSpec.moduleMembers(mod)) cands.add(memberCandidate(mod, m));
+                for (String m : LanguageAvailability.moduleMembers(mod)) cands.add(memberCandidate(mod, m));
             } else {
                 for (String m : enabledLibs) cands.add(new Candidate(m, Kind.MODULE, "module"));
                 for (String m : LocalModules.names()) {
@@ -2880,7 +2905,7 @@ public class CodeEditorWidget extends AbstractWidget {
             List<Candidate> cands = new ArrayList<>();
             String mod = resolveModule(receiver);
             if (mod != null) {
-                for (String m : LanguageSpec.moduleMembers(mod)) cands.add(memberCandidate(mod, m));
+                for (String m : LanguageAvailability.moduleMembers(mod)) cands.add(memberCandidate(mod, m));
             } else {
                 String cls = receiver.equals("self") && cursorLine < lineClass.length
                         ? lineClass[cursorLine] : variableClasses.get(receiver);
@@ -2952,7 +2977,11 @@ public class CodeEditorWidget extends AbstractWidget {
             Kind k = LanguageSpec.BUILTIN_TYPES.contains(fn) ? Kind.CLASS : Kind.FUNCTION;
             out.putIfAbsent(fn, new Candidate(fn, k, "builtin"));
         }
-        for (String m : LanguageSpec.PRELOADED_MODULES) out.putIfAbsent(m, new Candidate(m, Kind.MODULE, "module"));
+        for (String m : LanguageSpec.PRELOADED_MODULES) {
+            if (isOptionalApiModuleAvailable(m)) {
+                out.putIfAbsent(m, new Candidate(m, Kind.MODULE, "module"));
+            }
+        }
         for (Map.Entry<String, String> e : moduleAliases.entrySet()) {
             out.putIfAbsent(e.getKey(), new Candidate(e.getKey(), Kind.MODULE, "module"));
         }
@@ -2965,7 +2994,7 @@ public class CodeEditorWidget extends AbstractWidget {
                         : LocalModules.params(q) != null ? Kind.FUNCTION : Kind.VARIABLE;
             } else {
                 k = LanguageSpec.NATIVE_CLASSES.containsKey(q) ? Kind.CLASS
-                        : LanguageSpec.BUILTIN_FUNCTIONS.containsKey(q) ? Kind.FUNCTION : Kind.CONSTANT;
+                        : LanguageAvailability.builtinFunctions().containsKey(q) ? Kind.FUNCTION : Kind.CONSTANT;
             }
             out.putIfAbsent(e.getKey(), new Candidate(e.getKey(), k, q));
         }
@@ -3214,12 +3243,17 @@ public class CodeEditorWidget extends AbstractWidget {
     }
 
     private List<String> paramsFor(String name) {
+        if (isOptionalApiFunction(name)) {
+            String module = name.substring(0, name.indexOf('.'));
+            if (!isOptionalApiModuleAvailable(module)) return null;
+        }
+
         List<String> p = ctorParams.get(name);          // Player(  -> __init__ parameters
         if (p != null) return p;
         if (info.classes().containsKey(name)) return List.of();   // class without __init__
         p = callableParams.get(name);
         if (p != null) return p;
-        p = LanguageSpec.BUILTIN_FUNCTIONS.get(name);
+        p = LanguageAvailability.builtinFunctions().get(name);
         if (p != null) return p;
         p = LanguageSpec.NATIVE_CLASSES.get(name);
         if (p != null) return p;

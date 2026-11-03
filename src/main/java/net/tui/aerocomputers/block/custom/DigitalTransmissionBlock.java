@@ -27,6 +27,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.tui.aerocomputers.block.entity.DigitalTransmissionBlockEntity;
 import net.tui.aerocomputers.block.entity.ModBlockEntitys;
 import net.tui.aerocomputers.block.entity.SensorBlockEntity;
+import net.tui.aerocomputers.client.ShiftDown;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -99,12 +100,22 @@ public class DigitalTransmissionBlock extends DirectionalKineticBlock implements
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-        if(true) {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.digital_transmission_shift"));
+    public void appendHoverText(
+            ItemStack stack,
+            Item.TooltipContext context,
+            List<Component> tooltipComponents,
+            TooltipFlag tooltipFlag
+    ) {
+        if (ShiftDown.isDown()) {
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.digital_transmission_shift")
+            );
         } else {
-            tooltipComponents.add(Component.translatable("tooltip.createaerocomputers.pressshift"));
+            tooltipComponents.add(
+                    Component.translatable("tooltip.createaerocomputers.pressshift")
+            );
         }
+
         super.appendHoverText(stack, context, tooltipComponents, tooltipFlag);
     }
 

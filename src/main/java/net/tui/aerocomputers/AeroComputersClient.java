@@ -51,6 +51,7 @@ public class AeroComputersClient {
         event.register(ModMenuTypes.SENSOR_MENU.get(), SensorScreen::new);
         event.register(ModMenuTypes.DIGITALTRANSMISSION_MENU.get(), DigitalTransmissionScreen::new);
         event.register(ModMenuTypes.CAMERA_MENU.get(), CameraScreen::new);
+        event.register(ModMenuTypes.RADARBLOCKER_MENU.get(), RadarBlockerScreen::new);
     }
 
     @SubscribeEvent
@@ -130,12 +131,12 @@ public class AeroComputersClient {
     }
 
     @SubscribeEvent
-    public static void onFov(ViewportEvent.ComputeFov event) {
-        if (CameraFeed.rendering) event.setFOV(CameraFeed.fov);
+    public static void onClientTick(ClientTickEvent.Post event) {
+        CameraFeed.onClientTick();
     }
 
     @SubscribeEvent
-    public static void onClientTick(ClientTickEvent.Post event) {
-        CameraFeed.onClientTick();
+    public static void onFov(ViewportEvent.ComputeFov event) {
+        if (CameraFeed.rendering) event.setFOV(CameraFeed.fov);
     }
 }
