@@ -4,7 +4,8 @@
   "package": "net.tui.aerocomputers.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "CreativeModeTabMixin"
+    "CreativeModeTabMixin",
+    "ServerLevelMixin"
   ],
   "client": [
     "CreativeInventoryMixin",

@@ -21,6 +21,7 @@ import net.minecraft.client.CameraType;
 import net.minecraft.client.GraphicsStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.RenderBuffers;
@@ -199,9 +200,14 @@ public class CameraFeed {
         tickCounter++;
 
         // apply at most one chunk per camera and tick so the mesh compiles don't pile up
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+
         for (CameraWorld w : worlds.values()) {
             ClientSubLevelContainer sub = SubLevelContainer.getContainer(w.level);
-            if (sub != null) sub.tick();   // Sable only ticks the container of the real level
+            // Sable only ticks the container of the real level. Run it with the camera world swapped in,
+            // because Sable reads Minecraft.level / Minecraft.levelRenderer inside.
+            if (sub != null) inWorld(mc, w, sub::tick);
             if (CameraConfig.DEBUG && tickCounter % 40 == 0) debug(w);
 
             if (!w.centerSet) continue;   // view centre is set by the first entity packet
@@ -235,6 +241,8 @@ public class CameraFeed {
         tickPending = false;
 
         ClientLevel realLevel = mc.level;
+        LocalPlayer player = mc.player;
+        double playerX = player.getX(), playerY = player.getY(), playerZ = player.getZ();
 
         // create / validate the worlds first, while mc.level is still the real level
         Map<BlockPos, CameraWorld> active = new LinkedHashMap<>();
@@ -300,9 +308,15 @@ public class CameraFeed {
                 w.target.clear(Minecraft.ON_OSX);
                 w.target.bindWrite(true);
 
+                // Vanilla's LevelRenderer.setupRender centres its grid of render sections on the PLAYER, not on the
+                // camera. A camera farther away than the render distance would get no sections at all.
+                // So the player is placed at the camera for the duration of this render and put back afterwards.
+                player.setPosRaw(pos.x, pos.y, pos.z);
+
                 mc.gameRenderer.renderLevel(mc.getTimer());
             }
         } finally {
+            player.setPosRaw(playerX, playerY, playerZ);
             rendering = false;
             mc.gameRenderer.renderHand = oldHand;
             mc.mainRenderTarget = oldTarget;
@@ -362,7 +376,7 @@ public class CameraFeed {
 
         ClientSubLevelContainer sub = SubLevelContainer.getContainer(w.level);
         if (sub != null && sub.inBounds(pkt.getX(), pkt.getZ())) {
-            applyChunk(w, pkt);   // plot chunk of a mirrored sub-level: apply at once, the finalize signal follows
+            inWorld(Minecraft.getInstance(), w, () -> applyChunk(w, pkt));   // plot chunk: apply at once, finalize follows
         } else {
             w.chunkQueue.add(pkt);
         }
@@ -429,9 +443,11 @@ public class CameraFeed {
         CameraWorld w = worlds.get(cam);
         if (w == null) return;
 
-        for (CameraBlocksPayload.Change c : changes) {
-            w.level.setServerVerifiedBlockState(c.pos(), Block.stateById(c.stateId()), 19);
-        }
+        inWorld(Minecraft.getInstance(), w, () -> {
+            for (CameraBlocksPayload.Change c : changes) {
+                w.level.setServerVerifiedBlockState(c.pos(), Block.stateById(c.stateId()), 19);
+            }
+        });
     }
 
     public static void acceptBlockEntities(BlockPos cam, List<CameraBlockEntitiesPayload.Entry> entries) {
@@ -532,6 +548,15 @@ public class CameraFeed {
     public static void acceptSubLevels(CameraSubLevelsPayload p) {
         CameraWorld w = worlds.get(p.cam());
         if (w == null) return;
+
+        // Sable creates the render sections of a sub-level with Minecraft.levelRenderer's SectionRenderDispatcher
+        // (VanillaSubLevelRenderDispatcher.createRenderData). Outside of this swap that is the MAIN renderer and
+        // the MAIN level: the sections would be compiled from the wrong world, and Flywheel would take the block
+        // entities away from them. Inside the swap it is the camera world's own dispatcher.
+        inWorld(Minecraft.getInstance(), w, () -> applySubLevels(w, p));
+    }
+
+    private static void applySubLevels(CameraWorld w, CameraSubLevelsPayload p) {
         ClientSubLevelContainer container = SubLevelContainer.getContainer(w.level);
         if (container == null) return;
 
@@ -572,6 +597,20 @@ public class CameraFeed {
                 sl.setFinalized();
                 sl.updateRenderData();
             }
+        }
+    }
+
+    /** Runs 'action' with Minecraft.level / Minecraft.levelRenderer pointing at the camera world. */
+    private static void inWorld(Minecraft mc, CameraWorld w, Runnable action) {
+        ClientLevel oldLevel = mc.level;
+        LevelRenderer oldRenderer = mc.levelRenderer;
+        mc.level = w.level;
+        mc.levelRenderer = w.renderer;
+        try {
+            action.run();
+        } finally {
+            mc.levelRenderer = oldRenderer;
+            mc.level = oldLevel;
         }
     }
 

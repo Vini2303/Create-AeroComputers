@@ -413,11 +413,13 @@ public final class CameraChunkManager {
     // events
     // =========================================================
 
-    @SubscribeEvent
-    public static void onNeighborNotify(BlockEvent.NeighborNotifyEvent event) {
-        if (watched.isEmpty() || !(event.getLevel() instanceof ServerLevel level)) return;
+    /**
+     * Called by ServerLevelMixin from ServerLevel.sendBlockUpdated: every block change that has to reach
+     * clients, including block placements by sub-level assembly / disassembly (which never fire neighbour events).
+     */
+    public static void onBlockChanged(ServerLevel level, BlockPos pos) {
+        if (watched.isEmpty()) return;
 
-        BlockPos pos = event.getPos();
         int cx = pos.getX() >> 4, cz = pos.getZ() >> 4;
         int r = CameraConfig.SEND_RADIUS;
 

@@ -79,6 +79,4 @@ public class AeroComputers {
         DigitalTransmissionRegistry.clear();
         WeaponLinkerRegistry.clear();
     }
-
-    SchematicRenderer
 }
