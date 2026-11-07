@@ -53,6 +53,8 @@ public class AeroComputersClient {
         event.register(ModMenuTypes.CAMERA_MENU.get(), CameraScreen::new);
         event.register(ModMenuTypes.RADARBLOCKER_MENU.get(), RadarBlockerScreen::new);
         event.register(ModMenuTypes.WIRELESSKEYBOARD_MENU.get(), WirelessKeyboardScreen::new);
+        event.register(ModMenuTypes.PLAYERSENSOR_MENU.get(), PlayerSensorScreen::new);
+        event.register(ModMenuTypes.JOYSTICK_MENU.get(), JoystickScreen::new);
     }
 
     @SubscribeEvent
@@ -61,7 +63,6 @@ public class AeroComputersClient {
         event.registerBlockEntityRenderer(ModBlockEntitys.SENSOR_BE.get(), SensorRenderer::new);
         event.registerBlockEntityRenderer(ModBlockEntitys.DIGITALTRASMISSION_BE.get(), DigitalTransmissionRenderer::new);
         event.registerBlockEntityRenderer(ModBlockEntitys.CAMERA_BE.get(), CameraRenderer::new);
-
         event.registerBlockEntityRenderer(ModBlockEntitys.HUDDISPLAY_BE.get(), HudDisplayRenderer::new);
     }
 

@@ -14,62 +14,43 @@
   "block.createaerocomputers.hud_display": "HUD Display",
   "block.createaerocomputers.weapon_linker": "Weapon Linker",
   "block.createaerocomputers.radar_blocker": "Radar Blocker",
-
   "block.createaerocomputers.calcite_casing": "Calcite Casing",
-
   "block.createaerocomputers.sensor": "Sensor",
   "block.createaerocomputers.digital_transmission": "Digital Transmission",
   "block.createaerocomputers.camera": "Camera",
-
+  "block.createaerocomputers.joystick:": "Joystick",
   "block.createaerocomputers.transformium": "Transformium",
   "block.createaerocomputers.transformium_ore": "Transformium Ore",
 
-
   "creativetab.createaerocomputers.aerocomputers_tab": "AeroComputers",
-
   "tooltip.createaerocomputers.pressshift": "Press §eShift§r for more Information",
-
   "tooltip.createaerocomputers.hud_helmet": "Linked Computer:",
   "tooltip.createaerocomputers.hud_helmet_shift": "Equip to see the rendered hud the linked Board Computer generates.",
-
   "tooltip.createaerocomputers.hud_display_shift": "Click it to set the linked Board Computer. When set it will render the hud the linked Board Computer generates",
-
   "tooltip.createaerocomputers.board_computer_shift": "This Computer can be programmt with a language similar to Python, you can read Contraption telemetry data, you can create custom Heads up displays(HUD), you can connect to redstone links to control your aircraft, or if you want more destruction you can link the Create Arms mod for weapon support. If you need help with programming just click the Question Mark Button or Control-Click a word. You will also get feedback if your Syntax is wrong",
-
   "tooltip.createaerocomputers.weapon_linker_shift": "can be placed on an MDF or ... or an Big Cannon Mound, can be linked to a board computer, to get access to the Weapons",
-
   "tooltip.createaerocomputers.sensor_shift": "Place on a Sublevel to get information and telemetry",
-
   "tooltip.createaerocomputers.digital_transmission_shift": "Can control the rotation Speed via teh Board computer",
-
   "tooltip.createaerocomputers.camera_shift": "Create an eye for your computer",
-
   "tooltip.createaerocomputers.radar_blocker_shift": "Blocks Radar funktions, so you sublevel doent show up",
-
   "tooltip.createaerocomputers.wireless_keyboard_shift": "You can link every key you want with a redstone link frequency",
-
   "tooltip.createaerocomputers.player_sensor_shift": "You can read information about th player",
+  "tooltip.createaerocomputers.joystick_shift": "Use the joystick with you mouse to get redstone link signals",
 
   "help.aero.basics": "Basics",
   "help.aero.basics.text": "This is the basics of the Aero Computer.",
-
   "help.aero.variables": "Variables",
   "help.aero.variables.text": "Variables store values that your program can use.",
-
   "help.aero.channels": "Channels",
   "help.aero.channels.text": "Channels allow your computer to communicate with external devices.",
-
   "help.aero.code": "Code",
   "help.aero.code.text": "print(\"Hello World!\")",
-
   "help.aero.examples": "Examples",
   "help.aero.examples.text": "var x = 10\nprint(x)",
-
 
   "gui.createaerocomputers.banners.computer": "Computer",
   "gui.createaerocomputers.banners.transformer": "Transformer",
   "gui.createaerocomputers.banners.resources": "Resources",
-
 
   "createaerocomputers.configuration.allowNativeAccess": "Allow Native Access",
   "createaerocomputers.configuration.globalChatOutput": "Global Chat Output",

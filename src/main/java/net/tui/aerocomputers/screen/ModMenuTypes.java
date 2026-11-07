@@ -47,6 +47,9 @@ public class ModMenuTypes {
     public static final DeferredHolder<MenuType<?>, MenuType<PlayerSensorMenu>> PLAYERSENSOR_MENU =
             registerMenuType("player_sensor_menu", PlayerSensorMenu::new);
 
+    public static final DeferredHolder<MenuType<?>, MenuType<JoystickMenu>> JOYSTICK_MENU =
+            registerMenuType("joystick_menu", JoystickMenu::new);
+
     private static <T extends AbstractContainerMenu>DeferredHolder<MenuType<?>, MenuType<T>> registerMenuType(String name, IContainerFactory<T> factory) {
         return MENUS.register(name, () -> IMenuTypeExtension.create(factory));
     }

@@ -42,6 +42,12 @@ public class ModNetworking {
         );
 
         registrar.playToServer(
+                JoystickEntryPayload.TYPE,
+                JoystickEntryPayload.STREAM_CODEC,
+                JoystickEntryPayload::handle
+        );
+
+        registrar.playToServer(
                 HudDisplayEntryPayload.TYPE,
                 HudDisplayEntryPayload.STREAM_CODEC,
                 HudDisplayEntryPayload::handle
