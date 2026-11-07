@@ -55,6 +55,7 @@ public class AeroComputersClient {
         event.register(ModMenuTypes.WIRELESSKEYBOARD_MENU.get(), WirelessKeyboardScreen::new);
         event.register(ModMenuTypes.PLAYERSENSOR_MENU.get(), PlayerSensorScreen::new);
         event.register(ModMenuTypes.JOYSTICK_MENU.get(), JoystickScreen::new);
+        event.register(ModMenuTypes.PAINTTABLE_MENU.get(), PaintTableScreen::new);
     }
 
     @SubscribeEvent

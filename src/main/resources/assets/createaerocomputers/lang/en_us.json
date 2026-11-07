@@ -18,7 +18,8 @@
   "block.createaerocomputers.sensor": "Sensor",
   "block.createaerocomputers.digital_transmission": "Digital Transmission",
   "block.createaerocomputers.camera": "Camera",
-  "block.createaerocomputers.joystick:": "Joystick",
+  "block.createaerocomputers.joystick": "Joystick",
+  "block.createaerocomputers.paint_table": "Paint Table",
   "block.createaerocomputers.transformium": "Transformium",
   "block.createaerocomputers.transformium_ore": "Transformium Ore",
 
@@ -35,7 +36,8 @@
   "tooltip.createaerocomputers.radar_blocker_shift": "Blocks Radar funktions, so you sublevel doent show up",
   "tooltip.createaerocomputers.wireless_keyboard_shift": "You can link every key you want with a redstone link frequency",
   "tooltip.createaerocomputers.player_sensor_shift": "You can read information about th player",
-  "tooltip.createaerocomputers.joystick_shift": "Use the joystick with you mouse to get redstone link signals",
+  "tooltip.createaerocomputers.joystick_shift": "Use the Joystick with you mouse to get redstone link signals",
+  "tooltip.createaerocomputers.paint_table_shift": "Use the Paint Table to draw textures to render in the hud",
 
   "help.aero.basics": "Basics",
   "help.aero.basics.text": "This is the basics of the Aero Computer.",

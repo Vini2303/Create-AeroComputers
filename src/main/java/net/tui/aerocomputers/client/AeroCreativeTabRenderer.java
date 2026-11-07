@@ -51,7 +51,7 @@ public final class AeroCreativeTabRenderer {
         int clipTop = top + 17;
         int clipBottom = top + 108 + Y_OFFSET;
 
-        int scrollRows = Math.round(scrollOffs*(7-5))*18;
+        int scrollRows = Math.round(scrollOffs*(8-5))*18;
 
         drawBanner(
                 graphics, minecraft, COMPUTERS_BANNER,

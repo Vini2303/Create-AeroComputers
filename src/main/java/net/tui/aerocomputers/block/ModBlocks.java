@@ -52,8 +52,11 @@ public class ModBlocks {
     public static final DeferredBlock<Block> RADARBLOCKERBLOCK = registerBlock("radar_blocker",
             () -> new RadarBlockerBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
 
-    public static final DeferredBlock<Block> JOYSTICKBLOCK = registerBlock("joystick_block",
+    public static final DeferredBlock<Block> JOYSTICKBLOCK = registerBlock("joystick",
             () -> new JoystickBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
+
+    public static final DeferredBlock<Block> PAINTTABLEBLOCK = registerBlock("paint_table",
+            () -> new PaintTableBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
 
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
