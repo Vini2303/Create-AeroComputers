@@ -2,6 +2,7 @@ package net.tui.aerocomputers.mixin;
 
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.fml.common.Mod;
 import net.tui.aerocomputers.block.ModBlocks;
 import net.tui.aerocomputers.item.ModCreativeModeTabs;
 import net.tui.aerocomputers.item.ModItems;
@@ -50,6 +51,8 @@ public abstract class CreativeModeTabMixin {
         addItem(items, searchItems, ModBlocks.SENSORBLOCK.asItem());
         addItem(items, searchItems, ModBlocks.DIGITALTRANSMISSIONBLOCK.asItem());
         addItem(items, searchItems, ModBlocks.CAMERABLOCK.asItem());
+        addItem(items, searchItems, ModItems.WIRELESSKEYBOARD.asItem());
+        addItem(items, searchItems, ModItems.PLAYERSENESOR.asItem());
 
         // Pad the current section to a row boundary, then reserve a banner row.
         padToNextRow(items);

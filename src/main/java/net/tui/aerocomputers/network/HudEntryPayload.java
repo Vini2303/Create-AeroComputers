@@ -19,7 +19,6 @@ public record HudEntryPayload(
         String freq_two
 ) implements CustomPacketPayload {
 
-    public static final String NBT_KEY = "HudEntry";
     public static final String FREQ_ONE_KEY = "FreqOne";
     public static final String FREQ_TWO_KEY = "FreqTwo";
 

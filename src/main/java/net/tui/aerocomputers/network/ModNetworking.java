@@ -30,6 +30,18 @@ public class ModNetworking {
         );
 
         registrar.playToServer(
+                WirelessKeyboardEntryPayload.TYPE,
+                WirelessKeyboardEntryPayload.STREAM_CODEC,
+                WirelessKeyboardEntryPayload::handle
+        );
+
+        registrar.playToServer(
+                PlayerSensorEntryPayload.TYPE,
+                PlayerSensorEntryPayload.STREAM_CODEC,
+                PlayerSensorEntryPayload::handle
+        );
+
+        registrar.playToServer(
                 HudDisplayEntryPayload.TYPE,
                 HudDisplayEntryPayload.STREAM_CODEC,
                 HudDisplayEntryPayload::handle

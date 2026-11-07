@@ -27,6 +27,8 @@ public class ModCreativeModeTabs {
                         output.accept(ModBlocks.SENSORBLOCK);
                         output.accept(ModBlocks.DIGITALTRANSMISSIONBLOCK);
                         output.accept(ModBlocks.CAMERABLOCK);
+                        output.accept(ModItems.WIRELESSKEYBOARD);
+                        output.accept(ModItems.PLAYERSENESOR);
 
                         output.accept(ModBlocks.TRANSFORMIUM);
                         output.accept(ModBlocks.TRANSFORMIUMORE);

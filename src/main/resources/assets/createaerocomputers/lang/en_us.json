@@ -2,6 +2,8 @@
   "item.createaerocomputers.hud_helmet": "HUD Helmet",
   "item.createaerocomputers.raw_transformium": "Raw Transformium",
   "item.createaerocomputers.transformium_ingot": "Transformium Ingot",
+  "item.createaerocomputers.wireless_keyboard": "Wireless Keyboard",
+  "item.createaerocomputers.player_sensor": "Player Sensor",
 
   "item.createaerocomputers.calcite_alloy": "Calcite Alloy",
   "item.createaerocomputers.calcite_powder": "Calcite Powder",
@@ -43,6 +45,10 @@
   "tooltip.createaerocomputers.camera_shift": "Create an eye for your computer",
 
   "tooltip.createaerocomputers.radar_blocker_shift": "Blocks Radar funktions, so you sublevel doent show up",
+
+  "tooltip.createaerocomputers.wireless_keyboard_shift": "You can link every key you want with a redstone link frequency",
+
+  "tooltip.createaerocomputers.player_sensor_shift": "You can read information about th player",
 
   "help.aero.basics": "Basics",
   "help.aero.basics.text": "This is the basics of the Aero Computer.",

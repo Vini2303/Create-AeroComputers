@@ -11,6 +11,8 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.screen.custom.*;
 
+import java.awt.*;
+
 public class ModMenuTypes {
     public static final DeferredRegister<MenuType<?>> MENUS =
             DeferredRegister.create(Registries.MENU, AeroComputers.MOD_ID);
@@ -38,6 +40,12 @@ public class ModMenuTypes {
 
     public static final DeferredHolder<MenuType<?>, MenuType<RadarBlockerMenu>> RADARBLOCKER_MENU =
             registerMenuType("radar_blocker_menu", RadarBlockerMenu::new);
+
+    public static final DeferredHolder<MenuType<?>, MenuType<WirelessKeyboardMenu>> WIRELESSKEYBOARD_MENU =
+            registerMenuType("wireless_keyboard_menu", WirelessKeyboardMenu::new);
+
+    public static final DeferredHolder<MenuType<?>, MenuType<PlayerSensorMenu>> PLAYERSENSOR_MENU =
+            registerMenuType("player_sensor_menu", PlayerSensorMenu::new);
 
     private static <T extends AbstractContainerMenu>DeferredHolder<MenuType<?>, MenuType<T>> registerMenuType(String name, IContainerFactory<T> factory) {
         return MENUS.register(name, () -> IMenuTypeExtension.create(factory));

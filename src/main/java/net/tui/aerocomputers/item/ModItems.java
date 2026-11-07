@@ -7,6 +7,10 @@ import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.item.custom.HUDHelmetItem;
+import net.tui.aerocomputers.item.custom.PlayerSensorItem;
+import net.tui.aerocomputers.item.custom.WirelessKeyboardItem;
+
+import javax.swing.*;
 
 public class ModItems {
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(AeroComputers.MOD_ID);
@@ -32,6 +36,13 @@ public class ModItems {
 
     public static final DeferredItem<Item> INCOMPLETE_COMPUTING_MECHANISM = ITEMS.register("incomplete_computing_mechanism",
             () -> new Item(new Item.Properties()));
+
+    public static final DeferredItem<Item> WIRELESSKEYBOARD = ITEMS.register("wireless_keyboard",
+            () -> new WirelessKeyboardItem(new Item.Properties()));
+
+    public static final DeferredItem<Item> PLAYERSENESOR = ITEMS.register("player_sensor",
+            () -> new PlayerSensorItem(new Item.Properties()));
+
 
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);

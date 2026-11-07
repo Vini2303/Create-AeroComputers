@@ -52,6 +52,7 @@ public class AeroComputersClient {
         event.register(ModMenuTypes.DIGITALTRANSMISSION_MENU.get(), DigitalTransmissionScreen::new);
         event.register(ModMenuTypes.CAMERA_MENU.get(), CameraScreen::new);
         event.register(ModMenuTypes.RADARBLOCKER_MENU.get(), RadarBlockerScreen::new);
+        event.register(ModMenuTypes.WIRELESSKEYBOARD_MENU.get(), WirelessKeyboardScreen::new);
     }
 
     @SubscribeEvent
