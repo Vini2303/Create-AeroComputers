@@ -58,6 +58,12 @@ public class ModBlocks {
     public static final DeferredBlock<Block> PAINTTABLEBLOCK = registerBlock("paint_table",
             () -> new PaintTableBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD).noOcclusion()));
 
+    public static final DeferredBlock<Block> THRUSTERBLOCK = registerBlock("thruster",
+            () -> new ThrusterBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.METAL)));
+
+    public static final DeferredBlock<Block> PROJECTORBLOCK = registerBlock("projector",
+            () -> new ProjectorBlock(BlockBehaviour.Properties.of().strength(2).sound(SoundType.WOOD)));
+
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

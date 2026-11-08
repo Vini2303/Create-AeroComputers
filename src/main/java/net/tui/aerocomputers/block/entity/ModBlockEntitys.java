@@ -49,6 +49,14 @@ public class ModBlockEntitys {
             BLOCK_ENTITYS.register("paint_table_be", () -> BlockEntityType.Builder.of(
                     PaintTableBlockEntity::new, ModBlocks.PAINTTABLEBLOCK.get()).build(null));
 
+    public static final Supplier<BlockEntityType<ThrusterBlockEntity>> THRUSTER_BE =
+            BLOCK_ENTITYS.register("thruster_be", () -> BlockEntityType.Builder.of(
+                    ThrusterBlockEntity::new, ModBlocks.THRUSTERBLOCK.get()).build(null));
+
+    public static final Supplier<BlockEntityType<ProjectorBlockEntity>> PROJECTOR_BE =
+            BLOCK_ENTITYS.register("projector", () -> BlockEntityType.Builder.of(
+                    ProjectorBlockEntity::new, ModBlocks.PROJECTORBLOCK.get()).build(null));
+
 
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITYS.register(eventBus);

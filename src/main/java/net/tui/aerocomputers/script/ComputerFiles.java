@@ -14,6 +14,7 @@ import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 /** Server-side file operations. Every path is resolved against the world's aerocomputers folder. */
@@ -28,6 +29,16 @@ public final class ComputerFiles {
     public static void perform(ServerPlayer player, FileActionPayload.Action action,
                                String path, String extra) throws IOException {
         Path root = root(player.server);
+
+        // Single choke point: every file operation (read, write, create, move, delete...) is checked here.
+        if (action != FileActionPayload.Action.LIST) {
+            FolderLocks locks = FolderLocks.get(player.server);
+            FolderLocks.Session id = FolderLocks.sessionOf(player);
+            boolean ok = locks.mayTouch(id, path)
+                    && (action != FileActionPayload.Action.MOVE || locks.mayTouch(id, extra))
+                    && (action != FileActionPayload.Action.DELETE || locks.mayDelete(id, path));
+            if (!ok) throw new SecurityException("Folder is locked");
+        }
 
         switch (action) {
             case LIST -> { }
@@ -72,7 +83,7 @@ public final class ComputerFiles {
         String msg = switch (e) {
             case FileAlreadyExistsException ex -> "Already exists";
             case NoSuchFileException ex -> "No such file: " + ex.getMessage();
-            case SecurityException ex -> "Path not allowed";
+            case SecurityException ex -> ex.getMessage() == null ? "Path not allowed" : ex.getMessage();
             default -> e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
         };
         player.displayClientMessage(Component.literal(msg), true);
@@ -118,13 +129,19 @@ public final class ComputerFiles {
     }
 
     private static void sendTree(ServerPlayer player, Path root) throws IOException {
+        FolderLocks locks = FolderLocks.get(player.server);
+        FolderLocks.Session id = FolderLocks.sessionOf(player);
+
         List<FileTreePayload.Entry> out = new ArrayList<>();
         try (Stream<Path> s = Files.walk(root, MAX_DEPTH)) {
-            s.filter(p -> !p.equals(root)).limit(MAX_ENTRIES).forEach(p ->
-                    out.add(new FileTreePayload.Entry(
+            s.filter(p -> !p.equals(root))
+                    // filter BEFORE the limit so hidden entries don't use up the entry budget
+                    .filter(p -> locks.isVisible(id, root.relativize(p).toString().replace('\\', '/')))
+                    .limit(MAX_ENTRIES)
+                    .forEach(p -> out.add(new FileTreePayload.Entry(
                             root.relativize(p).toString().replace('\\', '/'),
                             Files.isDirectory(p))));
         }
-        PacketDistributor.sendToPlayer(player, new FileTreePayload(out));
+        PacketDistributor.sendToPlayer(player, FileTreePayload.forPlayer(player, out));
     }
 }

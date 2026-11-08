@@ -60,6 +60,18 @@ public class ModNetworking {
         );
 
         registrar.playToServer(
+                ThrusterEntryPayload.TYPE,
+                ThrusterEntryPayload.STREAM_CODEC,
+                ThrusterEntryPayload::handle
+        );
+
+        registrar.playToServer(
+                ProjectorEntryPayload.TYPE,
+                ProjectorEntryPayload.STREAM_CODEC,
+                ProjectorEntryPayload::handle
+        );
+
+        registrar.playToServer(
                 SensorEntryPayload.TYPE,
                 SensorEntryPayload.STREAM_CODEC,
                 SensorEntryPayload::handle
@@ -116,6 +128,7 @@ public class ModNetworking {
         registrar.playToClient(FileTreePayload.TYPE, FileTreePayload.STREAM_CODEC, FileTreePayload::handle);
         registrar.playToClient(FileContentPayload.TYPE, FileContentPayload.STREAM_CODEC, FileContentPayload::handle);
         registrar.playToClient(CameraSubLevelsPayload.TYPE, CameraSubLevelsPayload.STREAM_CODEC, ClientPayloads::handleCameraSubLevels);
+        registrar.playToServer(FolderLockPayload.TYPE, FolderLockPayload.STREAM_CODEC, FolderLockPayload::handle);
 
     }
 

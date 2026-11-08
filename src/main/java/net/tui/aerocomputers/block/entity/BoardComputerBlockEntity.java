@@ -469,8 +469,15 @@ public class BoardComputerBlockEntity extends KineticBlockEntity implements Menu
                 hasCreateArms ? new SlrwApi(this) : null,
                 hudScriptApi.asProxy(),
                 this::onPythonPrint,
-                fileRoot
+                fileRoot, FolderLocks.get(server),
+                this::getRunningScriptPath
         );
+    }
+
+    /** Root-relative path of the file being run (e.g. "nav/main.py"), or null for the computer's own program. */
+    public @Nullable String getRunningScriptPath() {
+        String p = programPath;   // <- the field that setProgramPath(...) writes
+        return (p == null || p.isBlank()) ? null : p;
     }
 
     private void closePythonRuntime() {

@@ -56,6 +56,8 @@ public class AeroComputersClient {
         event.register(ModMenuTypes.PLAYERSENSOR_MENU.get(), PlayerSensorScreen::new);
         event.register(ModMenuTypes.JOYSTICK_MENU.get(), JoystickScreen::new);
         event.register(ModMenuTypes.PAINTTABLE_MENU.get(), PaintTableScreen::new);
+        event.register(ModMenuTypes.THRUSTER_MENU.get(), ThrusterScreen::new);
+        event.register(ModMenuTypes.PROJECTOR_MENU.get(), ProjectorScreen::new);
     }
 
     @SubscribeEvent

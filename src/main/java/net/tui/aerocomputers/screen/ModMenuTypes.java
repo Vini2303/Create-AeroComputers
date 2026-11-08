@@ -53,6 +53,12 @@ public class ModMenuTypes {
     public static final DeferredHolder<MenuType<?>, MenuType<PaintTableMenu>> PAINTTABLE_MENU =
             registerMenuType("paint_table_menu", PaintTableMenu::new);
 
+    public static final DeferredHolder<MenuType<?>, MenuType<ThrusterMenu>> THRUSTER_MENU =
+            registerMenuType("thruster_menu", ThrusterMenu::new);
+
+    public static final DeferredHolder<MenuType<?>, MenuType<ProjectorMenu>> PROJECTOR_MENU =
+            registerMenuType("projector_menu", ProjectorMenu::new);
+
     private static <T extends AbstractContainerMenu>DeferredHolder<MenuType<?>, MenuType<T>> registerMenuType(String name, IContainerFactory<T> factory) {
         return MENUS.register(name, () -> IMenuTypeExtension.create(factory));
     }

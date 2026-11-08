@@ -31,6 +31,8 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.PLAYERSENESOR);
                         output.accept(ModBlocks.JOYSTICKBLOCK);
                         output.accept(ModBlocks.PAINTTABLEBLOCK);
+                        output.accept(ModBlocks.THRUSTERBLOCK);
+                        output.accept(ModBlocks.PROJECTORBLOCK);
 
                         output.accept(ModBlocks.TRANSFORMIUM);
                         output.accept(ModBlocks.TRANSFORMIUMORE);

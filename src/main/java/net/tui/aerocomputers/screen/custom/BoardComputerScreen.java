@@ -119,11 +119,11 @@ public class BoardComputerScreen extends AbstractContainerScreen<BoardComputerMe
         boardNameBox.setResponder(name -> PacketDistributor.sendToServer(new BoardComputerControlPayload(
                 menu.blockEntity.getBlockPos(), BoardComputerControlPayload.Action.NAME, name)));
 
-        runStateButton = Button.builder(Component.literal(menu.blockEntity.isRunning() ? "Pause" : "Run"), btn -> {
+        runStateButton = Button.builder(Component.literal(menu.blockEntity.isRunning() ? "Running" : "Paused"), btn -> {
             boolean newState = !menu.blockEntity.isRunning();
             PacketDistributor.sendToServer(new BoardComputerControlPayload(menu.blockEntity.getBlockPos(),
                     newState ? BoardComputerControlPayload.Action.PLAY : BoardComputerControlPayload.Action.PAUSE, ""));
-            btn.setMessage(Component.literal(newState ? "Pause" : "Run"));
+            btn.setMessage(Component.literal(newState ? "Running" : "Paused"));
         }).bounds(leftPos + 52, topPos + 48, 62, 18).build();
 
         restartButton = Button.builder(Component.literal("Restart"), btn -> {

@@ -8,12 +8,15 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.tui.aerocomputers.client.ClientFileState;
 import net.tui.aerocomputers.network.FileActionPayload;
 import net.tui.aerocomputers.network.FileActionPayload.Action;
 import net.tui.aerocomputers.network.FileTreePayload;
+import net.tui.aerocomputers.network.FolderLockPayload;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -28,12 +31,20 @@ public class FileExplorerWidget extends AbstractWidget {
     private static final int CHEV_W = 8;
     private static final int MENU_ITEM_H = 12;
 
-    private enum Mode { NONE, NEW_FILE, NEW_FOLDER, RENAME }
+    private static final Map<BlockPos, Set<String>> EXPANDED = new HashMap<>();
+    private final Set<String> expanded;
+
+    private enum Mode { NONE, NEW_FILE, NEW_FOLDER, RENAME, SET_PW, ENTER_PW, REMOVE_PW }
 
     private enum MenuItem {
-        NEW_FILE("New File"), NEW_FOLDER("New Folder"), RENAME("Rename"), DELETE("Delete");
+        NEW_FILE("New File"), NEW_FOLDER("New Folder"), RENAME("Rename"), DELETE("Delete"),
+        LOCK("Set Password..."), UNLOCK("Unlock..."), RELOCK("Lock Now"), REMOVE_LOCK("Remove Password...");
         final String label;
         MenuItem(String label) { this.label = label; }
+    }
+
+    private static boolean isPwMode(Mode m) {
+        return m == Mode.SET_PW || m == Mode.ENTER_PW || m == Mode.REMOVE_PW;
     }
 
     /** path == null && !edit is the special "<< Program" row. edit == true is the inline name box. */
@@ -44,7 +55,6 @@ public class FileExplorerWidget extends AbstractWidget {
     private final BiConsumer<String, String> onRenamed;    // (oldPath, newPath)
 
     private final List<Row> rows = new ArrayList<>();
-    private final Set<String> expanded = new HashSet<>();
     private final EditBox prompt;
 
     private String selected = "";
@@ -56,6 +66,9 @@ public class FileExplorerWidget extends AbstractWidget {
     private Mode mode = Mode.NONE;
     private String promptDir = "";
     private String renamePath = "";
+    private String pwPath = "";
+    /** Folder to expand as soon as the server confirms it is unlocked. */
+    private @Nullable String pendingExpand = null;
 
     // context menu
     private boolean menuOpen = false;
@@ -78,6 +91,8 @@ public class FileExplorerWidget extends AbstractWidget {
         this.onOpen = onOpen;
         this.onRenamed = onRenamed;
 
+        this.expanded = EXPANDED.computeIfAbsent(pos.immutable(), k -> new HashSet<>());
+
         prompt = new EditBox(Minecraft.getInstance().font, x, y, w, 9, Component.empty());
         prompt.setBordered(false);
         prompt.setMaxLength(48);
@@ -93,6 +108,11 @@ public class FileExplorerWidget extends AbstractWidget {
         if (seenVersion == ClientFileState.treeVersion) return false;
         seenVersion = ClientFileState.treeVersion;
         if (!selected.isEmpty() && !exists(selected)) selected = "";
+        if (pendingExpand != null) {
+            if (lockOf(pendingExpand) == 2) expanded.add(pendingExpand);
+            pendingExpand = null;
+        }
+        expanded.removeIf(p -> lockOf(p) == 1 || !exists(p));
         rebuild();
         return true;
     }
@@ -107,6 +127,7 @@ public class FileExplorerWidget extends AbstractWidget {
 
     public void cancelPrompt() {
         if (mode == Mode.NONE) return;
+        if (isPwMode(mode)) prompt.setValue("");   // never keep a typed password around
         mode = Mode.NONE;
         prompt.setFocused(false);
         rebuild();
@@ -132,6 +153,12 @@ public class FileExplorerWidget extends AbstractWidget {
     private boolean isDir(String path) {
         for (FileTreePayload.Entry e : ClientFileState.entries) if (e.path().equals(path)) return e.dir();
         return false;
+    }
+
+    /** 0 = no lock, 1 = locked, 2 = locked but unlocked for you. */
+    private int lockOf(String path) {
+        for (FileTreePayload.Entry e : ClientFileState.entries) if (e.path().equals(path)) return e.lockState();
+        return 0;
     }
 
     private void rebuild() {
@@ -169,6 +196,11 @@ public class FileExplorerWidget extends AbstractWidget {
                 rows.add(new Row(e.path(), nameOf(e.path()), e.dir(), depth, false));
             }
 
+            // password box directly under the folder it belongs to
+            if (isPwMode(mode) && e.path().equals(pwPath)) {
+                rows.add(new Row(null, "", false, depth + 1, true));
+            }
+
             if (e.dir() && expanded.contains(e.path())) addChildren(e.path(), depth + 1, byParent);
         }
 
@@ -200,7 +232,7 @@ public class FileExplorerWidget extends AbstractWidget {
     private int menuWidth() {
         Font font = Minecraft.getInstance().font;
         int w = font.width("Confirm delete?");
-        for (MenuItem it : MenuItem.values()) w = Math.max(w, font.width(it.label));
+        for (MenuItem it : menuItems) w = Math.max(w, font.width(it.label));
         return w + 12;
     }
 
@@ -276,7 +308,8 @@ public class FileExplorerWidget extends AbstractWidget {
 
             if (r.edit()) {
                 g.fill(getX(), ry, getX() + width - 4, ry + ROW_H, 0xFF1E1E1E);
-                boolean bad = prompt.getValue().contains("/") || prompt.getValue().contains("\\");
+                boolean bad = !isPwMode(mode)
+                        && (prompt.getValue().contains("/") || prompt.getValue().contains("\\"));
                 g.renderOutline(getX(), ry, width - 4, ROW_H, bad ? 0xFFFF5555 : 0xFF3399FF);
                 if (r.dir()) g.drawString(font, ">", x0, ry + 2, 0xFFAAAAAA);
 
@@ -286,6 +319,10 @@ public class FileExplorerWidget extends AbstractWidget {
                 prompt.setWidth(Math.max(20, getX() + width - 6 - tx));
                 prompt.setHeight(9);
                 prompt.render(g, mx, my, pt);
+
+                if (isPwMode(mode) && prompt.getValue().isEmpty()) {
+                    g.drawString(font, mode == Mode.SET_PW ? "new password" : "password", tx, ry + 2, 0xFF666666);
+                }
                 continue;
             }
 
@@ -301,6 +338,12 @@ public class FileExplorerWidget extends AbstractWidget {
                     : r.path().equals(openFile) ? 0xFF9CDCFE
                     : r.dir() ? 0xFFDCDC8B : 0xFFFFFFFF;
             g.drawString(font, r.name(), x0 + CHEV_W, ry + 2, color);
+
+            // padlock: closed = locked, open = unlocked for you
+            if (r.path() != null && r.dir()) {
+                int ls = lockOf(r.path());
+                if (ls != 0) drawLock(g, getX() + width - 14, ry + 1, ls == 1);
+            }
         }
 
         // drop highlight (whole folder block, like VS Code)
@@ -374,6 +417,14 @@ public class FileExplorerWidget extends AbstractWidget {
         }
     }
 
+    private void drawLock(GuiGraphics g, int x, int y, boolean closed) {
+        int c = closed ? 0xFFE5C07B : 0xFF6A9955;
+        g.fill(x + 1, y, x + 6, y + 1, c);                  // shackle top
+        g.fill(x + 1, y + 1, x + 2, y + 4, c);              // shackle left
+        if (closed) g.fill(x + 5, y + 1, x + 6, y + 4, c);  // shackle right (open lock leaves it out)
+        g.fill(x, y + 4, x + 7, y + 9, c);                  // body
+    }
+
     private void drawPlus(GuiGraphics g, int x, int y, int color, int bg) {
         g.fill(x - 1, y - 1, x + 8, y + 8, bg);             // knock out what's behind the plus
         g.fill(x, y + 3, x + 7, y + 4, color);               // horizontal
@@ -399,11 +450,20 @@ public class FileExplorerWidget extends AbstractWidget {
     private void openMenu(String target, double x, double y) {
         menuTarget = target;
         deleteArmed = false;
-        menuItems = target.isEmpty()
-                ? List.of(MenuItem.NEW_FILE, MenuItem.NEW_FOLDER)
-                : isDir(target)
-                ? List.of(MenuItem.NEW_FILE, MenuItem.NEW_FOLDER, MenuItem.RENAME, MenuItem.DELETE)
-                : List.of(MenuItem.RENAME, MenuItem.DELETE);
+
+        if (target.isEmpty()) {
+            menuItems = List.of(MenuItem.NEW_FILE, MenuItem.NEW_FOLDER);
+        } else if (!isDir(target)) {
+            menuItems = List.of(MenuItem.RENAME, MenuItem.DELETE);
+        } else {
+            menuItems = switch (lockOf(target)) {
+                case 1 -> List.of(MenuItem.UNLOCK);
+                case 2 -> List.of(MenuItem.NEW_FILE, MenuItem.NEW_FOLDER, MenuItem.RENAME, MenuItem.DELETE,
+                        MenuItem.RELOCK, MenuItem.REMOVE_LOCK);
+                default -> List.of(MenuItem.NEW_FILE, MenuItem.NEW_FOLDER, MenuItem.RENAME, MenuItem.DELETE,
+                        MenuItem.LOCK);
+            };
+        }
 
         int w = menuWidth();
         int h = menuItems.size() * MENU_ITEM_H + 2;
@@ -431,6 +491,14 @@ public class FileExplorerWidget extends AbstractWidget {
             case NEW_FILE -> { closeMenu(); startPrompt(Mode.NEW_FILE, ""); }
             case NEW_FOLDER -> { closeMenu(); startPrompt(Mode.NEW_FOLDER, ""); }
             case RENAME -> { closeMenu(); startPrompt(Mode.RENAME, nameOf(menuTarget)); }
+            case LOCK -> { closeMenu(); startPrompt(Mode.SET_PW, ""); }
+            case UNLOCK -> { closeMenu(); startPrompt(Mode.ENTER_PW, ""); }
+            case REMOVE_LOCK -> { closeMenu(); startPrompt(Mode.REMOVE_PW, ""); }
+            case RELOCK -> {
+                expanded.remove(menuTarget);
+                sendLock(FolderLockPayload.Action.RELOCK, menuTarget, "");
+                closeMenu();
+            }
             case DELETE -> {
                 if (!deleteArmed) {
                     deleteArmed = true;          // second click confirms
@@ -461,7 +529,7 @@ public class FileExplorerWidget extends AbstractWidget {
             closeMenu();   // clicked elsewhere: close, then handle the click normally
         }
 
-        // Inline name box is open.
+        // Inline name / password box is open.
         if (mode != Mode.NONE) {
             int ri = rowAt(mx, my);
             if (ri >= 0 && rows.get(ri).edit()) {
@@ -532,6 +600,7 @@ public class FileExplorerWidget extends AbstractWidget {
         if (dest.equals(parentOf(dragPath)) || dest.equals(dragPath) || dest.startsWith(dragPath + "/")) {
             return null;
         }
+        if (lockOf(dest) == 1) return null;              // can't drop into a closed locked folder
         return dest;
     }
 
@@ -548,13 +617,24 @@ public class FileExplorerWidget extends AbstractWidget {
 
         if (!wasDrag) {
             if (isDir(src)) {
-                if (!expanded.remove(src)) expanded.add(src);
+                if (lockOf(src) == 1) {                  // closed lock -> ask for the password
+                    selected = src;
+                    startPrompt(Mode.ENTER_PW, "");
+                    return true;
+                }
+                if (expanded.remove(src)) {
+                    if (lockOf(src) == 2) sendLock(FolderLockPayload.Action.RELOCK, src, "");   // collapsing = locking
+                } else {
+                    expanded.add(src);
+                }
                 rebuild();
             } else {
                 onOpen.accept(src);
             }
             return true;
         }
+
+        if (lockOf(src) == 1) return true;               // a closed locked folder can't be moved
 
         if (dest != null) {
             send(Action.MOVE, src, dest);
@@ -617,12 +697,23 @@ public class FileExplorerWidget extends AbstractWidget {
         if (m == Mode.RENAME) {
             if (selected.isEmpty()) return;
             renamePath = selected;
+        } else if (isPwMode(m)) {
+            if (selected.isEmpty() || !isDir(selected)) return;
+            pwPath = selected;
         } else {
             promptDir = selected.isEmpty() ? "" : isDir(selected) ? selected : parentOf(selected);
             if (!promptDir.isEmpty()) expanded.add(promptDir);
         }
 
         mode = m;
+
+        // password boxes show stars; normal prompts show the text
+        boolean pw = isPwMode(m);
+        prompt.setMaxLength(pw ? 64 : 48);
+        prompt.setFormatter(pw
+                ? (s, i) -> FormattedCharSequence.forward("*".repeat(s.length()), Style.EMPTY)
+                : (s, i) -> FormattedCharSequence.forward(s, Style.EMPTY));
+
         prompt.setValue(initial);
         if (m == Mode.RENAME && !isDir(renamePath)) {
             // select just the name, not the extension (like VS Code)
@@ -646,6 +737,8 @@ public class FileExplorerWidget extends AbstractWidget {
     }
 
     private void confirmPrompt() {
+        if (isPwMode(mode)) { confirmPassword(); return; }
+
         String value = prompt.getValue().trim();
         if (value.contains("/") || value.contains("\\")) return;   // keep the box open
 
@@ -676,6 +769,26 @@ public class FileExplorerWidget extends AbstractWidget {
             }
             default -> { }
         }
+    }
+
+    private void confirmPassword() {
+        String pw = prompt.getValue();   // passwords are not trimmed
+        Mode m = mode;
+        String path = pwPath;
+        cancelPrompt();                  // also clears the box
+        if (pw.isEmpty() || path.isEmpty()) return;
+
+        FolderLockPayload.Action a = switch (m) {
+            case SET_PW -> FolderLockPayload.Action.SET;
+            case ENTER_PW -> FolderLockPayload.Action.UNLOCK;
+            default -> FolderLockPayload.Action.REMOVE;
+        };
+        if (a == FolderLockPayload.Action.UNLOCK) pendingExpand = path;   // expands once the server agrees
+        sendLock(a, path, pw);
+    }
+
+    public void sendLock(FolderLockPayload.Action action, String path, String password) {
+        PacketDistributor.sendToServer(new FolderLockPayload(pos, action, path, password));
     }
 
     private void send(Action action, String path, String extra) {

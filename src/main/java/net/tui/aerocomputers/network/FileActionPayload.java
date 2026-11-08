@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.tui.aerocomputers.AeroComputers;
 import net.tui.aerocomputers.script.ComputerFiles;
+import net.tui.aerocomputers.script.FolderLocks;
 import net.tui.aerocomputers.screen.custom.BoardComputerMenu;
 
 public record FileActionPayload(BlockPos pos, Action action, String path, String extra)
@@ -44,22 +45,32 @@ public record FileActionPayload(BlockPos pos, Action action, String path, String
             if (!(player.containerMenu instanceof BoardComputerMenu menu)
                     || !menu.blockEntity.getBlockPos().equals(p.pos())) return;
             try {
+                // Lock checks happen inside perform(); it throws if the folder is locked.
                 ComputerFiles.perform(player, p.action(), p.path(), p.extra());
 
+                // Only reached on success, so a failed operation never leaves stale locks.
+                FolderLocks locks = FolderLocks.get(player.server);
                 var be = menu.blockEntity;
                 String path = clean(p.path());
                 switch (p.action()) {
-                    case READ -> be.setProgramPath(path);          // geöffnete Datei wird zum Programm
+                    case READ -> be.setProgramPath(path);          // the opened file becomes the program
                     case WRITE -> be.onFileWritten(path);
-                    case DELETE -> be.onPathDeleted(path);
+                    case DELETE -> {
+                        locks.onDeleted(path);
+                        be.onPathDeleted(path);
+                    }
                     case RENAME -> {
                         int i = path.lastIndexOf('/');
-                        be.onPathMoved(path, (i < 0 ? "" : path.substring(0, i + 1)) + p.extra().trim());
+                        String newPath = (i < 0 ? "" : path.substring(0, i + 1)) + p.extra().trim();
+                        locks.onMoved(path, newPath);
+                        be.onPathMoved(path, newPath);
                     }
                     case MOVE -> {
                         String dest = clean(p.extra());
                         String name = path.substring(path.lastIndexOf('/') + 1);
-                        be.onPathMoved(path, dest.isEmpty() ? name : dest + "/" + name);
+                        String newPath = dest.isEmpty() ? name : dest + "/" + name;
+                        locks.onMoved(path, newPath);
+                        be.onPathMoved(path, newPath);
                     }
                     default -> { }
                 }

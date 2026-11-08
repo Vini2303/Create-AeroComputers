@@ -11,20 +11,32 @@ import java.nio.file.*;
 import java.nio.file.attribute.FileAttribute;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
-/** Read/write inside root; read-only inside runtimeDir (GraalPy's own stdlib). Everything else is denied. */
+/**
+ * Read/write inside root; read-only inside runtimeDir (GraalPy's own stdlib). Everything else is denied.
+ * Folders protected by a password are only accessible to scripts that live inside that folder.
+ */
 public final class SandboxFileSystem implements FileSystem {
     private static final long MAX_FILE_BYTES = 1_048_576;
 
     private final Path root;
     private final Path runtimeDir;
+    private final FolderLocks locks;
+    private final Supplier<String> scriptPath;
     private final FileSystem delegate = FileSystem.newDefaultFileSystem();
 
-    public SandboxFileSystem(Path root, Path runtimeDir) throws IOException {
+    /**
+     * @param scriptPath returns the root-relative path of the file being run (e.g. "nav/main.py"),
+     *                   or null when the computer runs its own program text. Read on every file access.
+     */
+    public SandboxFileSystem(Path root, Path runtimeDir, FolderLocks locks, Supplier<String> scriptPath) throws IOException {
         Files.createDirectories(root);
         Files.createDirectories(runtimeDir);
         this.root = root.toRealPath();
         this.runtimeDir = runtimeDir.toRealPath();
+        this.locks = locks;
+        this.scriptPath = scriptPath;
         delegate.setCurrentWorkingDirectory(this.root);
     }
 
@@ -35,10 +47,19 @@ public final class SandboxFileSystem implements FileSystem {
                 .normalize();
     }
 
+    private String rel(Path abs) {
+        return root.relativize(abs).toString().replace('\\', '/');
+    }
+
     /** Resolves relative paths against root and enforces the access rules. */
     private Path check(Path p, boolean write) {
         Path abs = (p.isAbsolute() ? p : root.resolve(p)).normalize();
-        if (abs.startsWith(root)) return abs;
+        if (abs.startsWith(root)) {
+            if (!locks.pythonMayAccess(rel(abs), scriptPath.get())) {
+                throw new SecurityException("Folder is locked: " + p);
+            }
+            return abs;
+        }
         if (!write && abs.startsWith(runtimeDir)) return abs;
         throw new SecurityException("Path outside sandbox: " + p);
     }
@@ -105,7 +126,11 @@ public final class SandboxFileSystem implements FileSystem {
     @Override
     public Path toRealPath(Path path, LinkOption... options) throws IOException {
         Path real = delegate.toRealPath(check(path, false), options);
-        if (!real.startsWith(root) && !real.startsWith(runtimeDir)) {
+        if (real.startsWith(root)) {
+            if (!locks.pythonMayAccess(rel(real), scriptPath.get())) {
+                throw new SecurityException("Folder is locked: " + path);
+            }
+        } else if (!real.startsWith(runtimeDir)) {
             throw new SecurityException("Path outside sandbox: " + path);
         }
         return real;

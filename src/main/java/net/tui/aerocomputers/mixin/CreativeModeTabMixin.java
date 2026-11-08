@@ -55,10 +55,11 @@ public abstract class CreativeModeTabMixin {
         addItem(items, searchItems, ModItems.PLAYERSENESOR.asItem());
         addItem(items, searchItems, ModBlocks.JOYSTICKBLOCK.asItem());
         addItem(items, searchItems, ModBlocks.PAINTTABLEBLOCK.asItem());
+        addItem(items, searchItems, ModBlocks.THRUSTERBLOCK.asItem());
+        addItem(items, searchItems, ModBlocks.PROJECTORBLOCK.asItem());
 
         // Pad the current section to a row boundary, then reserve a banner row.
         padToNextRow(items);
-        addEmptyRow(items);
 
         addEmptyRow(items);
 

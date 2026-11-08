@@ -19,6 +19,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * A persistent, cooperative GraalPy runtime.
@@ -343,7 +344,14 @@ public final class PythonScriptRuntime implements AutoCloseable {
         _aero_start, _aero_step_n, _aero_get_names, _aero_wrap_api = _aero_make_runtime()
         """;
 
-    public PythonScriptRuntime(Object aeroApi, Object bigcApi, Object slrwApi, Object hudApi, Consumer<String> output, Path fileRoot) {
+    /**
+     * @param locks      folder password manager of the current server
+     * @param scriptPath root-relative path of the file being run (e.g. "nav/main.py"), or null if the
+     *                   computer runs its own program text. Read on every file access.
+     */
+    public PythonScriptRuntime(Object aeroApi, Object bigcApi, Object slrwApi, Object hudApi,
+                               Consumer<String> output, Path fileRoot,
+                               FolderLocks locks, Supplier<String> scriptPath) {
         this.output = output == null ? line -> {} : output;
         OutputStream chatOutput = new OutputStream() {
             private final ByteArrayOutputStream line = new ByteArrayOutputStream();
@@ -367,7 +375,9 @@ public final class PythonScriptRuntime implements AutoCloseable {
 
         IOAccess ioAccess;
         try {
-            ioAccess = IOAccess.newBuilder().fileSystem(new SandboxFileSystem(fileRoot, RUNTIME_DIR)).build();
+            ioAccess = IOAccess.newBuilder()
+                    .fileSystem(new SandboxFileSystem(fileRoot, RUNTIME_DIR, locks, scriptPath))
+                    .build();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
